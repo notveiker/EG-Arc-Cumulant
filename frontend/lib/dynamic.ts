@@ -1,9 +1,8 @@
 /**
  * Dynamic (dynamic.xyz) configuration — login + embedded wallets + signing.
  *
- * This is a NON-BREAKING scaffold. The app currently boots through the
- * RainbowKit provider in `app/providers.tsx`. To switch to Dynamic, point
- * `app/layout.tsx` at `./providers.dynamic` instead (see DYNAMIC_SETUP.md).
+ * LIVE: `app/layout.tsx` boots `./providers.dynamic`; RainbowKit (`app/providers.tsx`)
+ * is kept only as a reversible fallback (see DYNAMIC_SETUP.md).
  *
  * Docs (live, via the Dynamic MCP wired up in ../.mcp.json):
  *   React + wagmi: https://www.dynamic.xyz/docs/react/reference/using-wagmi

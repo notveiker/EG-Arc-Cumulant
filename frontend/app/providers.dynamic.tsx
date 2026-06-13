@@ -1,27 +1,22 @@
 "use client";
 
 /**
- * Dynamic (dynamic.xyz) provider tree — login + embedded wallets + signing,
- * bridged into wagmi so all the existing wagmi-based trading code keeps working.
+ * Dynamic (dynamic.xyz) provider tree — login (email / social / passkey) + embedded
+ * wallets + signing, bridged into wagmi so all existing wagmi-based trading keeps working.
  *
- * This is a DROP-IN ALTERNATIVE to ./providers.tsx (RainbowKit). It is NOT wired
- * in yet. To switch the app over, edit app/layout.tsx:
+ * LIVE: app/layout.tsx boots this provider. RainbowKit (./providers.tsx) is kept only as a
+ * reversible fallback — flip the layout import back to "./providers" to restore it.
  *
- *     - import { Providers } from "./providers";
- *     + import { Providers } from "./providers.dynamic";
+ * Provider order: DynamicContextProvider → WagmiProvider → QueryClientProvider →
+ * DynamicWagmiConnector. Ref: https://www.dynamic.xyz/docs/react/reference/using-wagmi
  *
- * and replace <ConnectButton/> usages with Dynamic's <DynamicWidget/> (or use the
- * `useDynamicContext()` hook). Then set NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID in
- * .env.local. See DYNAMIC_SETUP.md and the Dynamic docs MCP (../.mcp.json).
- *
- * Provider order matters: DynamicContextProvider → WagmiProvider →
- * QueryClientProvider → DynamicWagmiConnector.
- * Ref: https://www.dynamic.xyz/docs/react/reference/using-wagmi
+ * Client-only mount: Dynamic injects styles/DOM during render that differ between the SSR
+ * pass and the client, which trips React's hydration check ("Text content did not match").
+ * We render an SSR-stable placeholder until mount, then mount the Dynamic→wagmi tree on the
+ * client only — eliminating the hydration mismatch / dev error overlay.
  */
-import { useState } from "react";
-import {
-  DynamicContextProvider,
-} from "@dynamic-labs/sdk-react-core";
+import { useEffect, useState } from "react";
+import { DynamicContextProvider } from "@dynamic-labs/sdk-react-core";
 import { EthereumWalletConnectors } from "@dynamic-labs/ethereum";
 import { DynamicWagmiConnector } from "@dynamic-labs/wagmi-connector";
 import { WagmiProvider } from "wagmi";
@@ -34,6 +29,14 @@ import {
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  // SSR and the first client render both produce this identical static shell (no Dynamic),
+  // so there is nothing for React to mismatch. Dynamic mounts on the client after hydration.
+  if (!mounted) {
+    return <div suppressHydrationWarning style={{ minHeight: "100vh", background: "var(--c-bg)" }} />;
+  }
 
   return (
     <DynamicContextProvider
