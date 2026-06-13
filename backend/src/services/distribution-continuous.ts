@@ -402,6 +402,30 @@ const marketCache = new Map<string, ContinuousMarket>();
 let liveBuiltAt = 0;
 const LIVE_TTL_MS = 60_000;
 
+// Market snapshots, file-backed: the live cache only holds the current top-10 and
+// CLEARS on every refresh, so a `pm-*` id can roll out between a position's
+// prepare and its confirm/settle. We snapshot a market the moment it's prepared,
+// so confirm — which runs AFTER the wallet has already escrowed collateral —
+// never fails with "Unknown continuous market" and strands the trader's funds.
+const SNAP_FILE = path.join(process.cwd(), '.distribution-market-snapshots.json');
+function loadSnaps(): Map<string, ContinuousMarket> {
+  try {
+    const raw = JSON.parse(fs.readFileSync(SNAP_FILE, 'utf8')) as Record<string, ContinuousMarket>;
+    return new Map(Object.entries(raw));
+  } catch {
+    return new Map();
+  }
+}
+const marketSnapshots = loadSnaps();
+function snapshotMarket(m: ContinuousMarket): void {
+  marketSnapshots.set(m.id, m);
+  try {
+    fs.writeFileSync(SNAP_FILE, JSON.stringify(Object.fromEntries(marketSnapshots)));
+  } catch {
+    /* best effort */
+  }
+}
+
 /**
  * Build the full market set: live Polymarket CLOB forwards (numeric markets
  * fitted to real odds) + curated continuous markets (live-spot crypto, macro,
@@ -438,7 +462,11 @@ export function listContinuousMarkets(): ContinuousMarket[] {
 }
 
 export function getContinuousMarket(id: string): ContinuousMarket | undefined {
-  return marketCache.get(id);
+  // Live cache first; fall back to a prepared-position snapshot so a market that
+  // has rolled out of the top-10 can still be confirmed/settled (never strands
+  // already-escrowed collateral). `listContinuousMarkets` uses the raw cache, so
+  // stale snapshots never leak into the live market list.
+  return marketCache.get(id) ?? marketSnapshots.get(id);
 }
 
 // ---------------------------------------------------------------------------
@@ -727,6 +755,10 @@ export async function prepareContinuousOpen(args: {
   if (quote.collateral_required_usdc <= 0) {
     throw new Error('Set a view different from the market (move mu or sigma) before opening a position.');
   }
+  // Snapshot the market NOW (it's still in the live cache) so the later confirm
+  // can recover it even if the live feed has since dropped this id.
+  const snap = marketCache.get(args.marketId);
+  if (snap) snapshotMarket(snap);
   const treasury = treasuryAddress();
   // On Arc the CLIENT builds + signs the USDC escrow transfer to the treasury
   // (there are no backend-built tx bytes). We return the escrow target + the
