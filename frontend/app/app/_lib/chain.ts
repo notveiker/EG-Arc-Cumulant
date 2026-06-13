@@ -60,6 +60,12 @@ export function friendlyWalletError(err: unknown): string {
       msg = "";
     }
   }
+  // Our own signer-timeout message is already user-ready and actionable
+  // (embedded-wallet rate-limit hint) — pass it through verbatim before the
+  // generic "couldn't sign" fallback can swallow it.
+  if (/didn't return a signature/i.test(msg)) {
+    return msg.split("\n")[0];
+  }
   if (/user rejected|rejected the request|user denied|user cancel|rejection|denied transaction/i.test(msg)) {
     return "Transaction was rejected in your wallet.";
   }
