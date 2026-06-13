@@ -1,5 +1,5 @@
 /**
- * Continuous distribution markets (Paradigm-style), end to end on-chain.
+ * Continuous distribution markets (Paradigm-style) — off-chain quoting with escrow-gated settlement.
  *
  *   - The market view is a continuous Normal pdf  f = N(muM, sigmaM).
  *   - The trader submits their own continuous Normal pdf  g = N(muT, sigmaT).

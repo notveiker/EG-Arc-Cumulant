@@ -465,7 +465,7 @@ export default function DistributionPage() {
                           type="button"
                           onClick={() => setCollateral(String(Math.floor(Math.min(usdc.uiAmount, market.pool_liquidity_usdc) * 100) / 100))}
                           className="dc-max"
-                          title={`Use full balance · ${usdc.uiAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} mUSDC`}
+                          title={`Use full balance · ${usdc.uiAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC`}
                         >
                           MAX
                         </button>
@@ -491,7 +491,7 @@ export default function DistributionPage() {
                       <span style={{ fontFamily: FM, fontSize: 11, color: C.textMuted }}>
                         Balance:{" "}
                         <span style={{ color: C.textPrimary }}>
-                          {usdc.uiAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} mUSDC
+                          {usdc.uiAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC
                         </span>
                       </span>
                     </div>

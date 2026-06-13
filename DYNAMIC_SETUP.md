@@ -1,9 +1,9 @@
 # Dynamic setup (ETHGlobal NY 2026)
 
 Everything needed to integrate [Dynamic](https://www.dynamic.xyz/docs/overview/ethglobal-new-york-2026)
-(login + embedded wallets + signing) is pre-wired so you can start building
-immediately. The setup is **non-breaking** — the app still boots through the
-existing RainbowKit provider until you flip the switch.
+(login + embedded wallets + signing) is wired in and **live** — `app/layout.tsx` boots the
+Dynamic provider (`app/providers.dynamic.tsx`); RainbowKit (`app/providers.tsx`) is kept only
+as a reversible fallback.
 
 ## What's already done
 
