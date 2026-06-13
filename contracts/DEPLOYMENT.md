@@ -1,33 +1,36 @@
 # Cumulant — Arc testnet deployment
 
 Network: **Arc Testnet** · chainId `5042002` · RPC `https://rpc.testnet.arc.network`
-Explorer: https://testnet.arcscan.app · Audited four-product suite deployed **2026-06-04**
+Explorer: https://testnet.arcscan.app
+
+Run `make deploy-arc` to deploy the audited four-product suite, then fill in the addresses and
+tx hashes below from your own deployment.
 
 ## Addresses
 
 | Contract | Address |
 | --- | --- |
-| PredictionMarket | `0xdea4E388998c95d342dDA3E9f390cFcba85f60C9` |
-| BasketVault | `0x69880F01482B175d56e42f35008f184874173E91` |
-| TrancheVault | `0xbf4B8A33d3BBDcDD41aC84019257d0720B8BAE0D` |
-| ProtectedNote | `0x7ad54E69EA9919C6F066A05fb770f804ED2f362A` |
+| PredictionMarket | `<set after deploy>` |
+| BasketVault | `<set after deploy>` |
+| TrancheVault | `<set after deploy>` |
+| ProtectedNote | `<set after deploy>` |
 | USDC (collateral + native gas) | `0x3600000000000000000000000000000000000000` |
-| Owner / resolver / issuer | `0x7E9F7D571BbfBbDd1f41661CA421073B8f2Eebba` |
+| Owner / resolver / issuer | `<your deployer address>` |
 
-Machine-readable copy: [`deployments/5042002.json`](deployments/5042002.json).
+Machine-readable copy: `deployments/<chainId>.json` (written by the deploy; gitignored).
 
 ## Deploy transactions
 
 | Tx | Hash |
 | --- | --- |
-| Deploy PredictionMarket | `0xc7f9974f4d45ba1ba869d3622739524ebc4483b9bf1b45f99c3674df7f600b11` |
-| Deploy BasketVault | `0x7ea0caaecfd93f693959c87cc10296811b20d504bb1e32eefe617d2cf573bcd2` |
-| Deploy TrancheVault | `0x80a8fd9839ba5a98a40fd106c74f706c51e717ffd04366fab342f739276aa257` |
-| Deploy ProtectedNote | `0xbb9cca36571fae40cc15d1623118c1df3cf9e44b5b351e8e6640005ed98449c7` |
-| Seed note — createNote | `0xbf6e6f438693aa3394dde1e326e626e64d0636fa4d8b8edfe07f2fc97a29aae8` |
+| Deploy PredictionMarket | `<tx hash>` |
+| Deploy BasketVault | `<tx hash>` |
+| Deploy TrancheVault | `<tx hash>` |
+| Deploy ProtectedNote | `<tx hash>` |
+| Seed note — createNote | `<tx hash>` |
 
-The four markets, the "Macro Risk Basket", and the "Senior / Junior Macro" tranche are created in
-the same `forge script` broadcast (see `broadcast/Deploy.s.sol/5042002/run-latest.json`).
+The markets, baskets, and tranches are created in the same `forge script` broadcast (recorded
+under `broadcast/` locally; gitignored).
 
 ## Seeded state
 
@@ -43,11 +46,9 @@ grid so every surface reflects a real venue, not a handful of demos:
 - **5 Protected Notes** (funded on local; on Arc via `make seed-note-arc`) — ETH, BTC, gold,
   recession and AI upside notes, issuer-funded, plus seeded deposits so the UI shows live TVL.
 
-> The address table above is the original **2026-06-04** Arc deploy, which used an earlier minimal
-> seed (4 markets + one of each product). To publish the full grid on Arc, re-run `make deploy-arc`
-> — it deploys a fresh audited suite, seeds the grid, and rewrites `deployments/5042002.json` (the
-> backend's source of truth). That needs the funded deployer key and testnet gas. `make deploy-local`
-> produces the identical full grid on Anvil for free.
+> `make deploy-arc` deploys a fresh audited suite, seeds the grid, and writes
+> `deployments/<chainId>.json` (the backend's source of truth). It needs a funded deployer key and
+> testnet gas. `make deploy-local` produces the identical full grid on Anvil for free.
 
 ## Ownership / roles (production custody)
 
@@ -72,5 +73,5 @@ make seed-note-arc     # cast: approve + createNote on market 0
 
 Resolution is gated on `block.timestamp >= closeTime`, so the seeded markets (close +30 days)
 become resolvable only after that window — the realistic production behavior. Update the root
-`.env` after a redeploy, or rely on `deployments/5042002.json`, which the backend reads as the
+`.env` after a redeploy, or rely on `deployments/<chainId>.json`, which the backend reads as the
 source of truth.
