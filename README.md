@@ -28,7 +28,7 @@ one command.
 
 ## What works
 
-- All four Solidity contracts, with **62 passing Foundry tests** — unit, every revert path, a
+- All four Solidity contracts, with **63 passing Foundry tests** — unit, every revert path, a
   parimutuel **solvency fuzz**, the tranche **waterfall** (junior leverage, junior first-loss,
   senior impairment), a protected-note **`payout ≥ principal` invariant** fuzz, and the
   liveness/void/refund and access-control hardening cases.
