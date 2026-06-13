@@ -37,7 +37,7 @@ one command.
   address liveness (unresolvable legs can't freeze funds) and griefing (curated product creation).
 - **Backend** (Express + viem) reads every market / basket / tranche / note / portfolio from
   chain as JSON. The **only** thing it signs is the server-owned resolver role.
-- **Frontend** (Next.js App Router + wagmi + RainbowKit) — a route per product
+- **Frontend** (Next.js App Router + wagmi + Dynamic) — a route per product
   (`/app/portfolio`, `/app/basket` + `/basket/[id]`, `/app/tranche` + `/tranche/[id]`, `/app/ppn`,
   `/app/distribution`, `/app/docs`). Connect a wallet and sign your own
   `buy / claim / deposit / settle / redeem` across all four on-chain products; live odds,
@@ -67,7 +67,7 @@ cp .env.example .env
 # 1. Local chain + full deployment
 anvil &                         # local EVM on :8545
 cd contracts
-forge test                      # 62 passing
+forge test                      # 63 passing
 make deploy-local               # deploys MockUSDC + all 4 contracts + demo seed
 
 # 2. Backend (reads the local deployment)
@@ -102,7 +102,7 @@ Mint test collateral with no cap — `faucet(uint256)` / `mint(address,uint256)`
 ## Verification
 
 ```bash
-cd contracts && forge test            # 62 passing
+cd contracts && forge test            # 63 passing
 cd backend   && npm run build         # backend types/build
 cd frontend  && npm run build         # frontend build
 curl localhost:13201/api/health       # chain + contract status (markets/baskets/tranches/notes)

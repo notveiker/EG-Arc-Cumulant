@@ -525,7 +525,7 @@ export default function PortfolioPage() {
     {
       id: "cash",
       label: "Cash",
-      description: "Arc testnet mUSDC available",
+      description: "Arc testnet USDC available",
       value: liveUsdc,
       color: C.textMuted,
     },
@@ -1442,7 +1442,7 @@ export default function PortfolioPage() {
                       <div style={{ width: 4, height: 24, borderRadius: 2, background: "#4a5a6a" }} />
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, fontFamily: FD }}>USDC</div>
-                        <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, marginTop: 2 }}>Arc testnet mUSDC</div>
+                        <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, marginTop: 2 }}>Arc testnet USDC</div>
                       </div>
                     </div>
                     <div style={{ fontSize: 13, color: C.textPrimary, fontFamily: FD }}>{fmtUsd(liveUsdc, 2)}</div>
