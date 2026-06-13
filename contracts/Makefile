@@ -3,7 +3,7 @@
 include ../.env
 export
 
-.PHONY: build test fmt anvil deploy-local deploy-arc seed-note-arc
+.PHONY: build test fmt anvil deploy-local deploy-arc deploy-arc-mock seed-note-arc
 
 build:
 	forge build
@@ -32,6 +32,14 @@ deploy-arc:
 	SEED_DEMO=true \
 	forge script script/Deploy.s.sol:Deploy --rpc-url arc_testnet --broadcast --slow
 	$(MAKE) seed-note-arc
+
+# LIVE Arc testnet deploy using a freely-mintable MockUSDC as collateral (anyone can
+# mint / faucet / redeem), so demos aren't capped by the $20 testnet faucet. The mock has
+# no native blocklist precompile, so the suite + full seed (incl. the funded note) all
+# deploy in a single forge broadcast — no separate seed-note-arc cast step needed.
+deploy-arc-mock:
+	DEPLOY_MOCK_USDC=true SEED_DEMO=true \
+	forge script script/Deploy.s.sol:Deploy --rpc-url arc_testnet --broadcast --slow
 
 # Create the demo protected note on Arc via cast (broadcasts against the real node).
 seed-note-arc:
