@@ -226,6 +226,32 @@ export async function getNotes() {
   return Promise.all(Array.from({ length: n }, (_, i) => getNote(i)));
 }
 
+/** Raw senior/junior share balances (6dp base units) a user holds in a tranche. */
+export async function trancheSharesRaw(
+  trancheId: number,
+  user: Address,
+): Promise<{ senior: bigint; junior: bigint }> {
+  const { trancheVault } = requireContracts();
+  const [senior, junior] = await publicClient.readContract({
+    address: trancheVault,
+    abi: trancheVaultAbi,
+    functionName: "sharesOf",
+    args: [BigInt(trancheId), user],
+  });
+  return { senior, junior };
+}
+
+/** Raw principal (6dp base units) a user holds in a protected note. */
+export async function notePrincipalRaw(noteId: number, user: Address): Promise<bigint> {
+  const { protectedNote } = requireContracts();
+  return publicClient.readContract({
+    address: protectedNote,
+    abi: protectedNoteAbi,
+    functionName: "principalOf",
+    args: [BigInt(noteId), user],
+  });
+}
+
 // ── Portfolio ────────────────────────────────────────────────────────────────
 
 /**
