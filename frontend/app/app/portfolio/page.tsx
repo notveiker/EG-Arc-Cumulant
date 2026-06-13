@@ -88,7 +88,7 @@ const fmtAxisUsd = (v: number): string =>
   v >= 1000 ? `$${(v / 1000).toFixed(2)}K` : `$${v.toFixed(0)}`;
 
 function AccountValueChart({ value, pnl }: { value: number; pnl: number }) {
-  const [tf, setTf] = useState<AccountTfKey>("30D");
+  const [tf, setTf] = useState<AccountTfKey>("1D");
   const cfg = ACCOUNT_TF.find((t) => t.key === tf) ?? ACCOUNT_TF[2];
   const series = React.useMemo(() => buildValueSeries(value, cfg), [value, cfg]);
 
