@@ -52,6 +52,18 @@ export function bundleIndex(id: string): number {
   return synthBundles().findIndex((b) => b.id === id);
 }
 
+/**
+ * Reverse of {@link bundleIndex}: the representative bundle id at a canonical
+ * index. Used to label an on-chain note/tranche holding (which only carries its
+ * numeric id) with a human bundle id. Tranches are 1:1 with bundles so this is
+ * exact; notes wrap (fewer notes than bundles) so it's the first bundle that maps
+ * to that note. Returns null for an out-of-range index.
+ */
+export function bundleIdAtIndex(i: number): string | null {
+  const list = synthBundles();
+  return i >= 0 && i < list.length ? list[i].id : null;
+}
+
 // Bare array (the clients read `(await res.json()) as BundleSummary[]`).
 router.get("/", (_req: Request, res: Response) => res.json(synthBundles()));
 
