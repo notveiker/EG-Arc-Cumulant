@@ -228,6 +228,23 @@ export async function getNotes() {
 
 // ── Portfolio ────────────────────────────────────────────────────────────────
 
+/**
+ * Map [0, n) through `task` with at most `limit` calls in flight, so a large
+ * fan-out (e.g. 318 market position reads) doesn't burst the Arc RPC into
+ * dropping requests — the cause of intermittent 500s on /api/portfolio.
+ */
+async function mapPooled<T>(n: number, limit: number, task: (i: number) => Promise<T>): Promise<T[]> {
+  const out: T[] = new Array(n);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (let i = next++; i < n; i = next++) {
+      out[i] = await task(i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, Math.max(n, 1)) }, worker));
+  return out;
+}
+
 export async function getPortfolio(address: Address) {
   const { predictionMarket, basketVault, trancheVault, protectedNote, usdc: usdcAddr } =
     requireContracts();
@@ -245,63 +262,55 @@ export async function getPortfolio(address: Address) {
   ]);
 
   const positions = (
-    await Promise.all(
-      Array.from({ length: marketCount }, async (_, i) => {
-        const pos = await publicClient.readContract({
-          address: predictionMarket,
-          abi: predictionMarketAbi,
-          functionName: "getPosition",
-          args: [BigInt(i), address],
-        });
-        if (pos.yes === 0n && pos.no === 0n) return null;
-        return { marketId: i, yes: usdc(pos.yes), no: usdc(pos.no) };
-      }),
-    )
+    await mapPooled(marketCount, 12, async (i) => {
+      const pos = await publicClient.readContract({
+        address: predictionMarket,
+        abi: predictionMarketAbi,
+        functionName: "getPosition",
+        args: [BigInt(i), address],
+      });
+      if (pos.yes === 0n && pos.no === 0n) return null;
+      return { marketId: i, yes: usdc(pos.yes), no: usdc(pos.no) };
+    })
   ).filter(Boolean);
 
   const basketHoldings = (
-    await Promise.all(
-      Array.from({ length: basketCount }, async (_, i) => {
-        const shares = await publicClient.readContract({
-          address: basketVault,
-          abi: basketVaultAbi,
-          functionName: "sharesOf",
-          args: [BigInt(i), address],
-        });
-        if (shares === 0n) return null;
-        return { basketId: i, shares: usdc(shares) };
-      }),
-    )
+    await mapPooled(basketCount, 12, async (i) => {
+      const shares = await publicClient.readContract({
+        address: basketVault,
+        abi: basketVaultAbi,
+        functionName: "sharesOf",
+        args: [BigInt(i), address],
+      });
+      if (shares === 0n) return null;
+      return { basketId: i, shares: usdc(shares) };
+    })
   ).filter(Boolean);
 
   const trancheHoldings = (
-    await Promise.all(
-      Array.from({ length: trancheCount }, async (_, i) => {
-        const [senior, junior] = await publicClient.readContract({
-          address: trancheVault,
-          abi: trancheVaultAbi,
-          functionName: "sharesOf",
-          args: [BigInt(i), address],
-        });
-        if (senior === 0n && junior === 0n) return null;
-        return { trancheId: i, senior: usdc(senior), junior: usdc(junior) };
-      }),
-    )
+    await mapPooled(trancheCount, 12, async (i) => {
+      const [senior, junior] = await publicClient.readContract({
+        address: trancheVault,
+        abi: trancheVaultAbi,
+        functionName: "sharesOf",
+        args: [BigInt(i), address],
+      });
+      if (senior === 0n && junior === 0n) return null;
+      return { trancheId: i, senior: usdc(senior), junior: usdc(junior) };
+    })
   ).filter(Boolean);
 
   const noteHoldings = (
-    await Promise.all(
-      Array.from({ length: noteCount }, async (_, i) => {
-        const principal = await publicClient.readContract({
-          address: protectedNote,
-          abi: protectedNoteAbi,
-          functionName: "principalOf",
-          args: [BigInt(i), address],
-        });
-        if (principal === 0n) return null;
-        return { noteId: i, principal: usdc(principal) };
-      }),
-    )
+    await mapPooled(noteCount, 12, async (i) => {
+      const principal = await publicClient.readContract({
+        address: protectedNote,
+        abi: protectedNoteAbi,
+        functionName: "principalOf",
+        args: [BigInt(i), address],
+      });
+      if (principal === 0n) return null;
+      return { noteId: i, principal: usdc(principal) };
+    })
   ).filter(Boolean);
 
   return {

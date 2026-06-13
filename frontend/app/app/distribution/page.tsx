@@ -12,6 +12,7 @@ import {
   quoteContinuous,
   fetchContinuousPositions,
   openContinuousPosition,
+  useContinuousEscrow,
   settleContinuousPosition,
   closeContinuousPosition,
   type CloseResult,
@@ -224,6 +225,7 @@ const PANEL: React.CSSProperties = {
 export default function DistributionPage() {
   const wallet = useWalletSigner();
   const activeAddress = useActiveWalletAddress();
+  const signEscrow = useContinuousEscrow();
 
   const [markets, setMarkets] = useState<ContinuousMarket[]>([]);
   const [marketId, setMarketId] = useState<string | null>(null);
@@ -321,6 +323,7 @@ export default function DistributionPage() {
         targetMu: mu,
         targetSigma: sigma,
         collateralUsdc: Number(collateral),
+        signEscrow,
       });
       setStage(null);
       setResult({ txHash: res.txHash });

@@ -4,6 +4,7 @@
 
 import { getHighLiquidityMarkets } from "./polymarket.js";
 import { filterMarkets, type FilteredMarket } from "./market-filter.js";
+import { metrics } from "./metrics.js";
 
 export interface CuratedMarket {
   id: number;
@@ -55,6 +56,23 @@ export async function refreshCurated(): Promise<void> {
       // drop troll + unanswerable markets.
       const raw = await getHighLiquidityMarkets(500, 1_200);
       const result = filterMarkets(raw, { minVolumeUsd: 500, maxDaysToResolution: 400 });
+      // Record the funnel into the lifetime monitor counters. Previously this only
+      // ran in the (shadowed, unreachable) markets.ts /curated handler, so the live
+      // curated path left filterRunsTotal / markets-seen-kept-rejected at zero.
+      metrics.recordFilterRun({
+        timestamp: Date.now(),
+        source: "curated_list",
+        input_count: result.funnel.input_count,
+        kept_count: result.funnel.kept_count,
+        rejected_count: result.funnel.rejected_count,
+        per_stage: {
+          liquidity_floor: { entered: result.funnel.per_stage.liquidity_floor.entered, rejected: result.funnel.per_stage.liquidity_floor.rejected },
+          quality_nlp: { entered: result.funnel.per_stage.quality_nlp.entered, rejected: result.funnel.per_stage.quality_nlp.rejected },
+          time_window: { entered: result.funnel.per_stage.time_window.entered, rejected: result.funnel.per_stage.time_window.rejected },
+          category_classify: { entered: result.funnel.per_stage.category_classify.entered, rejected: result.funnel.per_stage.category_classify.rejected },
+          diversity_prefilter: { entered: result.funnel.per_stage.diversity_prefilter.entered, rejected: result.funnel.per_stage.diversity_prefilter.rejected },
+        },
+      });
       // Never overwrite a good cache with an empty result (transient Gamma rate-limit).
       if (result.kept.length > 0 || !cache) {
         cache = { markets: result.kept.map(mapMarket), funnel: result.funnel, at: Date.now() };
