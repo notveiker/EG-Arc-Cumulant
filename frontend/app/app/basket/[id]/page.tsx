@@ -1023,6 +1023,8 @@ function BasketBuyPanel({
             ? "No position to sell"
             : appConnected && sellOverPosition
               ? "Exceeds held position"
+              : appConnected && vaultState !== "finalized"
+                ? "Redeem after settlement"
               : txStage === "preparing"
                 ? "Preparing redeem…"
                 : txStage === "signing"
@@ -1044,11 +1046,14 @@ function BasketBuyPanel({
         !overCap &&
         !txBusy &&
         txStage !== "done"
-      : hasSellQty &&
-        !sellOverCap &&
-        !txBusy &&
+      : // Disconnected: allow the click so it opens the wallet picker. Connected:
+        // require `canSell` (which includes vaultState === "finalized") so an active
+        // basket — which has no on-chain early exit — doesn't show an enabled button
+        // that no-ops on `!canSell` inside handlePrimary.
         txStage !== "done" &&
-        (!appConnected || (heldQty > 0 && !sellOverPosition));
+        (!appConnected
+          ? hasSellQty && !sellOverCap && !txBusy
+          : canSell);
 
   return (
     <div
