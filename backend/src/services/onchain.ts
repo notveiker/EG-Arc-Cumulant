@@ -28,6 +28,8 @@ import {
   getTrancheCount,
   getNote,
   getNoteCount,
+  trancheSharesRaw,
+  notePrincipalRaw,
 } from "../contracts.js";
 import { erc20Abi } from "../abi/erc20.js";
 
@@ -145,6 +147,112 @@ export async function resolveBundleToOnchain(bundleId: string): Promise<OnchainO
     basketId,
     explorerUrl: vaultAddress ? explorerAddress(vaultAddress) : "",
   };
+}
+
+/** A protected note resolved to a real on-chain ProtectedNote position. */
+export interface OnchainNoteRef {
+  /** The ProtectedNote CONTRACT ADDRESS the client signs `deposit(noteId, amount)` against. */
+  vault: string;
+  /** The resolved on-chain note id (an index into ProtectedNote._notes). */
+  noteId: number;
+  explorerUrl: string;
+}
+
+/** A tranche position resolved to a real on-chain TrancheVault position. */
+export interface OnchainTrancheRef {
+  /** The TrancheVault CONTRACT ADDRESS the client signs `deposit(trancheId, amount, senior)` against. */
+  vault: string;
+  /** The resolved on-chain tranche id (an index into TrancheVault._tranches). */
+  trancheId: number;
+  explorerUrl: string;
+}
+
+/**
+ * Map a synthetic bundle id to a REAL on-chain ProtectedNote note id. Notes are
+ * seeded in the same canonical order as the bundle list, so the bundle index IS
+ * the note id (wrapped by the live note count, since there can be fewer notes
+ * than bundles). Falls back to the FNV hash for an unknown id. Returns null when
+ * the contracts aren't configured or no notes exist yet.
+ */
+export async function resolveBundleToNote(bundleId: string): Promise<OnchainNoteRef | null> {
+  if (!vaultConfigured() || !VAULT.protectedNote) return null;
+  const count = await getNoteCount();
+  if (count <= 0) return null;
+  const idx = bundleIndex(bundleId);
+  const noteId = (idx >= 0 ? idx : hashBundleId(bundleId)) % count;
+  return {
+    vault: VAULT.protectedNote,
+    noteId,
+    explorerUrl: explorerAddress(VAULT.protectedNote),
+  };
+}
+
+/**
+ * Map a synthetic bundle id to a REAL on-chain TrancheVault tranche id (same
+ * canonical-index scheme as {@link resolveBundleToNote}). Returns null when the
+ * contracts aren't configured or no tranches exist yet.
+ */
+export async function resolveBundleToTranche(bundleId: string): Promise<OnchainTrancheRef | null> {
+  if (!vaultConfigured() || !VAULT.trancheVault) return null;
+  const count = await getTrancheCount();
+  if (count <= 0) return null;
+  const idx = bundleIndex(bundleId);
+  const trancheId = (idx >= 0 ? idx : hashBundleId(bundleId)) % count;
+  return {
+    vault: VAULT.trancheVault,
+    trancheId,
+    explorerUrl: explorerAddress(VAULT.trancheVault),
+  };
+}
+
+/** A protected note redeem resolved to the owner's real on-chain position. */
+export interface RedeemNoteRef extends OnchainNoteRef {
+  /** Owner's principal in the note, 6dp base units (string for bigint safety). */
+  principal6dp: string;
+}
+
+/** A tranche redeem resolved to the owner's real on-chain shares. */
+export interface RedeemTrancheRef extends OnchainTrancheRef {
+  /** Owner's shares in the chosen slice, 6dp base units (string for bigint safety). */
+  shares6dp: string;
+  /** True for the senior slice (the on-chain `bool senior`). */
+  senior: boolean;
+}
+
+/**
+ * Resolve a redeem of a protected note: the on-chain note id + vault + the
+ * owner's principal (which `ProtectedNote.redeem(noteId)` returns in full plus a
+ * pro-rata coupon). Returns null if the bundle can't be resolved on-chain.
+ */
+export async function resolveRedeemNote(
+  bundleId: string,
+  owner: string,
+): Promise<RedeemNoteRef | null> {
+  const ref = await resolveBundleToNote(bundleId);
+  if (!ref) return null;
+  const principal = await notePrincipalRaw(ref.noteId, owner as Address).catch(() => 0n);
+  return { ...ref, principal6dp: principal.toString() };
+}
+
+/**
+ * Resolve a redeem of a tranche position: the on-chain tranche id + vault + the
+ * owner's shares in the senior/junior slice selected by `kind`. The shares feed
+ * `TrancheVault.redeem(trancheId, shares, senior)`.
+ */
+export async function resolveRedeemTranche(
+  bundleId: string,
+  owner: string,
+  kind: "senior" | "junior" | "mezzanine",
+): Promise<RedeemTrancheRef | null> {
+  const ref = await resolveBundleToTranche(bundleId);
+  if (!ref) return null;
+  const senior = kind === "senior";
+  const balances = await trancheSharesRaw(ref.trancheId, owner as Address).catch(() => ({
+    senior: 0n,
+    junior: 0n,
+  }));
+  const shares = senior ? balances.senior : balances.junior;
+  return { ...ref, shares6dp: shares.toString(), senior };
 }
 
 // ───────────────────────────────────────────────────────────────────────────
