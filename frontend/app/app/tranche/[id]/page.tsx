@@ -522,23 +522,31 @@ function DistributionChart({
   const shape = betaShapeMatching(mu, Math.max(1e-6, sigma));
 
   // Sample 400 points across the full axis so the skew on HIGH / LOW
-  // baskets renders smoothly.
+  // baskets renders smoothly. Keep each density so we can pick a ROBUST
+  // normaliser below (and avoid re-evaluating the shape).
   const N = 400;
-  const pts: Array<{ x: number; y: number; val: number }> = [];
-  let maxD = 0;
+  const pts: Array<{ x: number; y: number; val: number; d: number }> = [];
   for (let i = 0; i <= N; i++) {
     const val = lo + (span * i) / N;
-    const d = shape(val);
-    pts.push({
-      x: padL + (plotW * i) / N,
-      y: 0,
-      val,
-    });
-    if (d > maxD) maxD = d;
+    pts.push({ x: padL + (plotW * i) / N, y: 0, val, d: shape(val) });
   }
+
+  // A moment-matched Beta with α<1 or β<1 has an integrable SINGULARITY at the
+  // 0 / 1 boundary — e.g. a low-probability basket (μ≈4%, σ≈6.8% → α≈0.3) blows
+  // up at x=0. Normalising by that raw peak squashed the whole distribution to a
+  // flat line beneath a 1px spike. So take the max over the INTERIOR only
+  // (excluding the outer 8% where a boundary singularity lives) and clamp every
+  // height to [0,1]. A genuine interior mode (a well-formed bell) never falls in
+  // that margin, so bell-shaped baskets are unaffected; J-shaped ones now show
+  // their body with the spike flat-topped at the chart ceiling.
+  const edge = Math.floor(N * 0.08);
+  let maxD = 0;
+  for (let i = edge; i <= N - edge; i++) if (pts[i].d > maxD) maxD = pts[i].d;
+  if (!(maxD > 0)) for (const p of pts) if (p.d > maxD) maxD = p.d; // degenerate fallback
+  const denom = Math.max(1e-9, maxD);
   for (const p of pts) {
-    const d = shape(p.val);
-    p.y = padT + (1 - d / Math.max(1e-9, maxD)) * plotH;
+    const h = Math.min(1, p.d / denom);
+    p.y = padT + (1 - h) * plotH;
   }
 
   // Convert an outcome value to an x-coordinate in the plot.
