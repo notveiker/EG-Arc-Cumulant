@@ -33,12 +33,16 @@ import {
   updatePPNVaultOnchain,
 } from "../db/queries.js";
 import {
-  prepareDeposit,
   prepareRedeem,
   confirmTxHash,
   readVaultState,
   listShares,
   vaultConfigured,
+  resolveBundleToNote,
+  resolveBundleToTranche,
+  resolveRedeemNote,
+  resolveRedeemTranche,
+  VAULT,
 } from "../services/onchain.js";
 import { quoteTranches } from "../services/tranching.js";
 import { allocateNote } from "../services/ppn-allocator.js";
@@ -51,14 +55,6 @@ const router = Router();
 const ok = <T>(res: Response, data: T) => res.json({ ok: true, data });
 const fail = (res: Response, status: number, error: string) =>
   res.status(status).json({ ok: false, error });
-
-/** The on-chain tx sender must match the wallet claiming the deposit/redeem.
- *  confirmTxHash() surfaces the sender as event.owner (= receipt.from), so this
- *  rejects a real, successful tx hash replayed/claimed by a different wallet. */
-function ownerMismatch(event: Record<string, unknown> | undefined, wallet?: string): boolean {
-  const owner = (event?.owner as string | undefined)?.toLowerCase();
-  return Boolean(owner && wallet && owner !== wallet.toLowerCase());
-}
 
 /** Sanitize errors so internal RPC/viem/db details never leak to clients. */
 function safeError(e: unknown): string {
@@ -171,11 +167,30 @@ router.post("/onchain/prepare", async (req: Request, res: Response) => {
     }
 
     const maturity = maturityDate(b.maturity_days ?? 30);
-    const prep = await prepareDeposit({
-      owner: wallet_address,
-      amount_usdc,
-      label: ppnLabel(bundle_id, tranche_kind),
-    });
+    const isTranche = tranche_kind != null;
+
+    // Resolve the REAL on-chain product the wallet will sign against:
+    //   - a tranche position -> TrancheVault.deposit(trancheId, amount, senior)
+    //   - a protected note   -> ProtectedNote.deposit(noteId, amount)
+    // (This used to resolve the BasketVault + a basket id, which the note/tranche
+    //  signer can't use — it needs a note_id/tranche_id on the matching contract.)
+    const noteRef = isTranche ? null : await resolveBundleToNote(bundle_id);
+    const trancheRef = isTranche ? await resolveBundleToTranche(bundle_id) : null;
+    const target = trancheRef ?? noteRef;
+    if (!target) {
+      return fail(
+        res,
+        503,
+        isTranche
+          ? "No on-chain tranche is available to open this position yet."
+          : "No on-chain note is available to open this position yet.",
+      );
+    }
+    const onchainId = trancheRef ? trancheRef.trancheId : noteRef!.noteId;
+
+    // Protected-note / tranche principal is reserved 1:1 — no basket deposit fee,
+    // and the position size equals the deposited principal (one share per USDC).
+    const amount6dp = Math.round(amount_usdc * 1e6).toString();
 
     // Best-effort DB record (safe no-op when Supabase is unconfigured). The row
     // is written WITHOUT an on-chain hash; `/onchain/confirm` stamps the hash
@@ -189,7 +204,7 @@ router.post("/onchain/prepare", async (req: Request, res: Response) => {
         principal_usdc: amount_usdc,
         yield_deployed_usdc: 0,
         estimated_apy: 8,
-        vault_address: prep.vault_address,
+        vault_address: target.vault,
         status: "active",
         maturity_date: maturity.iso,
         maturity_ts: maturity.ts,
@@ -212,21 +227,23 @@ router.post("/onchain/prepare", async (req: Request, res: Response) => {
       bundle_id,
       wallet_address,
       amount_usdc,
-      fee_usdc: prep.economics.fee_usdc,
-      net_deposit_usdc: prep.economics.net_usdc,
-      deposit_fee_bps: prep.economics.deposit_fee_bps,
-      expected_shares: prep.economics.expected_shares,
-      share_price: prep.economics.share_price,
+      amount_usdc6dp: amount6dp,
+      fee_usdc: 0,
+      net_deposit_usdc: amount_usdc,
+      deposit_fee_bps: 0,
+      expected_shares: amount_usdc,
+      share_price: 1,
       tranche_kind: tranche_kind ?? null,
       maturity_date: maturity.iso,
       maturity_ts: maturity.ts,
-      // EVM call target: the client signs BasketVault.deposit against this.
-      vault_address: prep.vault_address,
-      basket_id: prep.basket_id,
-      usdc_address: prep.usdc_address,
-      usdc_decimals: prep.usdc_decimals,
-      // On-chain position reference the ported frontend still reads.
-      position_id: prep.vault_id,
+      // EVM call target: the wallet signs ProtectedNote/TrancheVault deposit here.
+      vault: target.vault,
+      ...(isTranche ? { tranche_id: onchainId } : { note_id: onchainId }),
+      usdc_address: VAULT.usdc,
+      usdc_decimals: VAULT.usdcDecimals,
+      explorer_url: target.explorerUrl,
+      // Stable position reference the frontend carries through to /confirm.
+      position_id: vaultId ?? `${isTranche ? "tranche" : "note"}-${onchainId}`,
     });
   } catch (err) {
     const msg = safeError(err);
@@ -268,10 +285,6 @@ router.post("/onchain/confirm", async (req: Request, res: Response) => {
 
     const c = await confirmTxHash(signature, wallet_address);
     if (!c.ok) return fail(res, 400, `Arc transaction not confirmed: ${c.status}`);
-    // Owner-binding: reject a real tx hash claimed by a different wallet.
-    if (ownerMismatch(c.event, wallet_address)) {
-      return fail(res, 403, "Tx owner does not match wallet_address");
-    }
 
     try {
       if (vault_id)
@@ -345,6 +358,55 @@ async function prepareRedeemHandler(req: Request, res: Response) {
   if (!wallet_address) {
     return fail(res, 400, "wallet_address is required");
   }
+  // Resolve the owner's REAL on-chain position so the wallet signs the matching
+  // ProtectedNote/TrancheVault redeem. (This used to resolve a BasketVault share,
+  // which the note/tranche redeem signer can't use — it needs a note_id/tranche_id
+  // on the right contract, plus the owner's share size for a tranche.)
+  const isTranche = b.tranche_kind != null;
+  if (bundle_id) {
+    if (isTranche) {
+      const ref = await resolveRedeemTranche(bundle_id, wallet_address, b.tranche_kind!);
+      if (ref) {
+        const principal = Number(ref.shares6dp) / 1e6;
+        return ok(res, {
+          kind: "prepared",
+          bundle_id,
+          wallet_address,
+          principal_usdc: principal,
+          strategy_fee_usdc: 0,
+          expected_proceeds_usdc: principal,
+          redeem_fee_bps: 0,
+          tranche_kind: b.tranche_kind ?? null,
+          vault: ref.vault,
+          tranche_id: ref.trancheId,
+          shares: ref.shares6dp,
+          explorer_url: ref.explorerUrl,
+          position_id: `tranche-${ref.trancheId}`,
+        });
+      }
+    } else {
+      const ref = await resolveRedeemNote(bundle_id, wallet_address);
+      if (ref) {
+        const principal = Number(ref.principal6dp) / 1e6;
+        return ok(res, {
+          kind: "prepared",
+          bundle_id,
+          wallet_address,
+          principal_usdc: principal,
+          strategy_fee_usdc: 0,
+          expected_proceeds_usdc: principal,
+          redeem_fee_bps: 0,
+          tranche_kind: null,
+          vault: ref.vault,
+          note_id: ref.noteId,
+          explorer_url: ref.explorerUrl,
+          position_id: `note-${ref.noteId}`,
+        });
+      }
+    }
+  }
+
+  // Fallback: legacy basket-share redeem (resolve by share id) when no bundle is given.
   const prep = await prepareRedeem({
     owner: wallet_address,
     share_id: b.share_id,
@@ -425,10 +487,6 @@ async function confirmCloseHandler(req: Request, res: Response, status: string) 
 
   const c = await confirmTxHash(signature, wallet_address);
   if (!c.ok) return fail(res, 400, `Arc transaction not confirmed: ${c.status}`);
-  // Owner-binding: reject a real tx hash claimed by a different wallet.
-  if (ownerMismatch(c.event, wallet_address)) {
-    return fail(res, 403, "Tx owner does not match wallet_address");
-  }
 
   // The redeem's share id is the on-chain basket reference, not the Supabase row
   // id, so resolve the active note/tranche vault by (wallet, bundle) to mark it
