@@ -796,21 +796,14 @@ export default function HomePage() {
           .pipe-sub { color: ${C.textMuted}; font-family: ${FM}; font-size: 11px; letter-spacing: 0.04em; margin-top: 7px; }
           .pipe-idx { position: absolute; top: 0; right: 0; color: ${C.textMuted}; opacity: 0.55; font-family: ${FM}; font-size: 11px; letter-spacing: 0.1em; }
 
-          /* ---- closing (single spec-sheet panel) ---- */
-          .lp-close { display: grid; grid-template-columns: 0.86fr 1.14fr; border: 0.5px solid ${C.border}; border-radius: 16px; background: ${C.cardGradient}; overflow: hidden; }
-          .lp-close-left { padding: 36px; display: flex; flex-direction: column; border-right: 0.5px solid ${C.border}; }
-          .lp-close-left h3 { color: ${C.textPrimary}; font-family: ${FD}; font-size: 26px; line-height: 1.14; letter-spacing: -0.03em; font-weight: 600; margin: 16px 0 0; max-width: 320px; text-wrap: balance; }
-          .lp-close-left p { color: ${C.textSubtle}; font-family: ${FS}; font-size: 14px; line-height: 1.6; margin: 14px 0 0; max-width: 340px; text-wrap: pretty; }
-          .lp-close-cta { display: inline-flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 28px; color: ${C.tealLight}; font-family: ${FD}; font-size: 13px; font-weight: 600; text-decoration: none; width: fit-content; }
-          .lp-close-cta .lp-ar { transition: transform 0.2s ${EASE}; }
-          .lp-close-cta:hover .lp-ar { transform: translateX(4px); }
-          .lp-spec { display: flex; flex-direction: column; }
-          .lp-spec-row { display: grid; grid-template-columns: 132px minmax(0, 1fr) auto; gap: 18px; align-items: center; padding: 22px 28px; border-top: 0.5px solid ${C.border}; transition: background 0.18s ${EASE}; }
-          .lp-spec-row:first-child { border-top: 0; }
-          .lp-spec-row:hover { background: ${C.cardHover}; }
-          .lp-spec-row .sk { color: ${C.textMuted}; font-family: ${FM}; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; }
-          .lp-spec-row .st { color: ${C.textPrimary}; font-family: ${FD}; font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-          .lp-spec-row .sv { color: ${C.textSecondary}; font-family: ${FM}; font-size: 12px; text-align: right; white-space: nowrap; }
+          /* ---- closing (centered call to action) ---- */
+          .lp-close { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 48px 0; }
+          .lp-close-left { display: flex; flex-direction: column; align-items: center; }
+          .lp-close-left h3 { color: ${C.textPrimary}; font-family: ${FD}; font-size: clamp(34px, 4vw, 46px); line-height: 1.08; letter-spacing: -0.032em; font-weight: 600; margin: 18px 0 0; max-width: 620px; text-wrap: balance; }
+          .lp-close-left p { color: ${C.textSubtle}; font-family: ${FS}; font-size: 16px; line-height: 1.62; margin: 18px 0 0; max-width: 480px; text-wrap: pretty; }
+          .lp-close .lp-actions { margin-top: 40px; }
+          .lp-btn-xl { height: 56px; padding: 0 34px; font-size: 16px; border-radius: 12px; gap: 10px; }
+          .lp-btn-xl .lp-ar svg { width: 19px; height: 19px; }
 
           /* ---- footer ---- */
           .lp-footer { border-top: 0.5px solid ${C.border}; padding: 64px 0 0; }
@@ -824,7 +817,7 @@ export default function HomePage() {
           .lp-fcol a:hover { color: ${C.tealLight}; }
           .lp-footer-base { margin-top: 56px; padding: 22px 0 8px; border-top: 0.5px solid ${C.border}; display: flex; align-items: center; justify-content: space-between; gap: 16px; color: ${C.textMuted}; font-family: ${FM}; font-size: 11px; letter-spacing: 0.04em; flex-wrap: wrap; }
 
-          .lp-btn:focus-visible, .feat-link:focus-visible, .lp-spec-row:focus-visible, .lp-fcol a:focus-visible, .lp-close-cta:focus-visible {
+          .lp-btn:focus-visible, .feat-link:focus-visible, .lp-fcol a:focus-visible {
             outline: 2px solid ${C.tealLight}; outline-offset: 3px; border-radius: 9px;
           }
 
@@ -848,8 +841,6 @@ export default function HomePage() {
             .feat-row { grid-template-columns: 1fr; gap: 28px; }
             .feat-row.is-rev .feat-panel { order: 1; }
             .feat-row.is-rev .feat-text { order: 2; }
-            .lp-close { grid-template-columns: 1fr; }
-            .lp-close-left { border-right: 0; border-bottom: 0.5px solid ${C.border}; }
             .lp-foot-main { grid-template-columns: 1fr; gap: 32px; }
           }
           @media (max-width: 620px) {
@@ -857,8 +848,6 @@ export default function HomePage() {
             .lp-stat { border-left: 0; }
             .lp-readout { grid-template-columns: repeat(2, 1fr); gap: 16px 0; }
             .lp-readout > div:nth-child(3) { border-left: 0; padding-left: 0; }
-            .lp-spec-row { grid-template-columns: 1fr; gap: 6px; }
-            .lp-spec-row .sv { text-align: left; }
             .lp-trust { flex-wrap: wrap; gap: 8px 0; }
           }
         ` }} />
@@ -943,24 +932,10 @@ export default function HomePage() {
                 <h3>The plumbing stays out of your way</h3>
                 <p>Cumulant folds live order books and yields into one quote, then writes the position to Arc.</p>
                 <div className="lp-actions">
-                  <Link className="lp-btn lp-btn-primary" href="/app">
+                  <Link className="lp-btn lp-btn-primary lp-btn-xl" href="/app">
                     Enter app <span className="lp-ar"><IconArrow /></span>
                   </Link>
                 </div>
-              </div>
-              <div className="lp-spec">
-                {[
-                  ["Market data", candidate?.title ?? "Distribution candidates", candidate ? `${candidate.clob_book_count}/${candidate.band_count} CLOB books` : "Gamma + CLOB"],
-                  ["Quote asset", "USDC collateral, net-route accounting", fmtUsd(net, 0)],
-                  ["Vault split", "Protected sleeve vs. market upside", `${pct(protectedVaultPct, 1)} / ${pct(basketPct, 1)}`],
-                  ["On-chain", "Arc testnet Arc USDC route", "Configured"],
-                ].map(([k, t, v]) => (
-                  <div className="lp-spec-row" key={k}>
-                    <span className="sk">{k}</span>
-                    <span className="st">{t}</span>
-                    <span className="sv">{v}</span>
-                  </div>
-                ))}
               </div>
             </div>
           </section>
@@ -991,7 +966,7 @@ export default function HomePage() {
                   <h5>Resources</h5>
                   <Link href="/app/portfolio">Portfolio</Link>
                   <Link href="/app/docs">About &amp; docs</Link>
-                  <a href="https://github.com/notveiker/EG-Arc-Cumulant" target="_blank" rel="noreferrer">GitHub</a>
+                  <a href="https://github.com/tharune/arc-cumulant" target="_blank" rel="noreferrer">GitHub</a>
                 </div>
               </div>
             </div>
