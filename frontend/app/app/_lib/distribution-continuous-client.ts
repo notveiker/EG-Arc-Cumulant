@@ -218,7 +218,13 @@ const escrowErc20Abi = [
 
 function escrowAmount6dp(prep: ContinuousOpenPrepare): bigint {
   if (prep.amount_usdc6dp != null && prep.amount_usdc6dp !== "") {
-    return BigInt(prep.amount_usdc6dp);
+    // Already-6dp base units. Tolerate a stray decimal/scientific form rather
+    // than letting BigInt() throw an opaque SyntaxError.
+    const s = String(prep.amount_usdc6dp).trim();
+    if (/^\d+$/.test(s)) return BigInt(s);
+    const n = Number(s);
+    if (!Number.isFinite(n)) throw new Error(`Invalid escrow base-unit amount: ${prep.amount_usdc6dp}`);
+    return BigInt(Math.round(n));
   }
   if (prep.collateral_usdc != null) {
     return parseUnits(String(prep.collateral_usdc), 6);

@@ -1,17 +1,14 @@
 "use client";
 
-import { useConnectModal } from "@rainbow-me/rainbowkit";
+import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
 
 /**
- * the wallet SDK-compatible `<ConnectModal trigger={…}>` shim, backed by RainbowKit.
- *
- * This uses `wagmi + RainbowKit`'s ConnectModal so a primary
- * action (Buy / Deploy) could open the wallet picker on click without a separate
- * "Connect Wallet" button. On Arc the equivalent is RainbowKit's connect modal:
- * we render the provided `trigger` and open the modal when it's clicked. The
- * `open` / `onOpenChange` props are accepted for compatibility (RainbowKit owns
- * its own modal state).
+ * `<ConnectModal trigger={…}>` shim — now backed by Dynamic. Lets a primary action
+ * (Buy / Deposit / Deploy) open Dynamic's login/auth flow inline on click, so a
+ * not-yet-connected user is prompted to log in (email / social / passkey / wallet)
+ * without a separate "Connect Wallet" button. The `open` / `onOpenChange` props are
+ * accepted for compatibility (Dynamic owns its own modal state).
  */
 export function ConnectModal({
   trigger,
@@ -22,11 +19,11 @@ export function ConnectModal({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
-  const { openConnectModal } = useConnectModal();
+  const { setShowAuthFlow } = useDynamicContext();
   const fire = (orig?: (e: unknown) => void) => (e: unknown) => {
     orig?.(e);
     onOpenChange?.(true);
-    openConnectModal?.();
+    setShowAuthFlow(true);
   };
   if (isValidElement(trigger)) {
     const el = trigger as ReactElement<{ onClick?: (e: unknown) => void }>;

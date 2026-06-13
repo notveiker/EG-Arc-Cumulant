@@ -44,21 +44,6 @@ export interface HealthResponse {
   services: { supabase: HealthService; polymarket: HealthService };
 }
 
-export interface MLMetrics {
-  model: string;
-  execution_status: string;
-  all_checks_passed: boolean;
-  metrics: {
-    classifier_precision: number;
-    walkforward_mean_improvement: number;
-    walkforward_p_value: number;
-    var_95: number;
-    var_99: number;
-    cvar_95: number;
-    cvar_99: number;
-  };
-}
-
 export interface PolymarketMarket {
   id: string;
   question: string;
@@ -78,9 +63,6 @@ export interface MarketsResponse {
 
 export function fetchHealth() {
   return safeJson<HealthResponse>('/api/health', undefined, 15_000);
-}
-export function fetchMLMetrics() {
-  return safeJson<MLMetrics>('/api/ml/metrics');
 }
 export function fetchMarkets(limit = 6) {
   return safeJson<MarketsResponse>(`/api/markets?limit=${limit}`);

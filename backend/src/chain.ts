@@ -21,6 +21,12 @@ export const arcTestnet = defineChain({
   blockExplorers: {
     default: { name: "Arcscan", url: "https://testnet.arcscan.app" },
   },
+  contracts: {
+    // Canonical Multicall3, deployed on Arc testnet. Lets viem batch the
+    // portfolio's per-market reads into a few aggregate3 calls instead of
+    // hundreds of individual eth_calls that trip the public RPC's rate limit.
+    multicall3: { address: "0xcA11bde05977b3631167028862bE2a173976CA11" },
+  },
   testnet: true,
 });
 
@@ -37,6 +43,10 @@ export const chain = config.chain === "local" ? anvil : arcTestnet;
 export const publicClient: PublicClient = createPublicClient({
   chain,
   transport: http(config.rpcUrl),
+  // When the chain exposes Multicall3 (Arc does), batch concurrent eth_calls
+  // through it so the portfolio's many per-market reads collapse into a few
+  // aggregate calls instead of hundreds that trip the public RPC's rate limit.
+  batch: chain.contracts?.multicall3 ? { multicall: true } : undefined,
 });
 
 /**

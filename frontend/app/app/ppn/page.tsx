@@ -5,6 +5,7 @@ import { Header, PageFrame } from "../_components/Header";
 import { C, FS, FD, FM, EASE, fmtUsd, BACKEND_URL } from "../_lib/tokens";
 import { IS_LEGACY, friendlyWalletError } from "../_lib/chain";
 import { ConnectModal } from "../_components/ConnectModal";
+import { FlowFundCard } from "../_components/FlowFundCard";
 import { BUNDLES, bundleById } from "../_lib/bundles";
 import { useSandbox } from "../_lib/demo-state";
 import { useLiveBaskets } from "../_lib/use-live-baskets";
@@ -888,6 +889,13 @@ export default function PpnPage() {
                     <strong>{value}</strong>
                   </div>
                 ))}
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <FlowFundCard
+                  wallet={activeAddress ?? undefined}
+                  bundle={selectedStrategy?.basket?.id ?? ""}
+                />
               </div>
 
               {!appConnected ? (

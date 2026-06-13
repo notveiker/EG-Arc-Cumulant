@@ -1,6 +1,9 @@
 import "./globals.css";
 import Script from "next/script";
-import { Providers } from "./providers";
+// Dynamic (email / social / passkey + embedded wallets), wagmi-bridged so all
+// wallet-signed trading keeps working. RainbowKit remains in ./providers as a
+// reversible fallback — swap this import back to "./providers" to restore it.
+import { Providers } from "./providers.dynamic";
 import { ThemeProvider, THEME_BOOTSTRAP_SCRIPT } from "@/lib/theme";
 
 export const metadata = {
