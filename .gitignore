@@ -32,3 +32,12 @@ contracts/broadcast/**/run-*.json
 .DS_Store
 .idea/
 .vscode/
+
+# ── Excluded from this public release ─────────────────────────────────────────
+# Proprietary models / quant research — kept private, not for the public repo.
+cumulant-correlation-models/
+# Onchain deploy artifacts — regenerated per deployment and tied to a deployer
+# key. Redeploy fresh under your own keys (see handoff notes), then update the
+# address tables in README.md / contracts/DEPLOYMENT.md.
+contracts/deployments/
+contracts/broadcast/
