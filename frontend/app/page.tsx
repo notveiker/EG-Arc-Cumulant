@@ -991,7 +991,7 @@ export default function HomePage() {
                   <h5>Resources</h5>
                   <Link href="/app/portfolio">Portfolio</Link>
                   <Link href="/app/docs">About &amp; docs</Link>
-                  <a href="https://github.com/tharune/arc-cumulant" target="_blank" rel="noreferrer">GitHub</a>
+                  <a href="https://github.com/notveiker/EG-Arc-Cumulant" target="_blank" rel="noreferrer">GitHub</a>
                 </div>
               </div>
             </div>

@@ -363,14 +363,6 @@ export interface PolymarketMarket {
   end_date_iso?: string;
 }
 
-/** GET /api/demo/status */
-export interface DemoStatusResponse {
-  demo_wallet: string;
-  note: string;
-  active_bundles: number;
-  total_bundles: number;
-}
-
 /** SSE data event for /api/sse/nav/:bundleId */
 export interface SSENavEvent {
   nav: number;
@@ -522,11 +514,6 @@ export const API_ENDPOINTS = {
     stats: "/api/admin/stats",
     cancelBundle: (id: string) => `/api/admin/bundles/${id}/cancel`,
     transactions: "/api/admin/transactions",
-  },
-
-  demo: {
-    simulateLifecycle: "/api/demo/simulate-lifecycle",
-    status: "/api/demo/status",
   },
 
   ppn: {

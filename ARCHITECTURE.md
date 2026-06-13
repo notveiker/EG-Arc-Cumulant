@@ -83,10 +83,9 @@ Express + viem. `config.ts` resolves the active chain (`arc` | `local`) and cont
 (env first, else `contracts/deployments/<chainId>.json`). `contracts.ts` reads markets, baskets,
 and portfolios and serializes USDC amounts as `{ raw, usd }`.
 
-The backend **never signs user actions.** Its only signing key is the server-owned resolver/demo
-account, used for two things: `POST /api/resolver/resolve` (the legitimate admin/oracle role) and
-`POST /api/demo/lifecycle` (a self-contained scripted lifecycle for the `Demo` tab — create →
-house-stake → deposit → resolve → settle → redeem, returned as ordered steps with explorer links).
+The backend **never signs user actions.** Its only signing key is the server-owned resolver
+account, used solely for the two resolver routes: `POST /api/resolver/resolve` (the legitimate
+admin/oracle role) and `POST /api/resolver/void` (the liveness escape that refunds a stuck market).
 This is the core fix over a custodial design: real users own and sign their own trades. On local
 the resolver key defaults to Anvil account #0 (the deployer/resolver that holds the seeded USDC);
 on Arc it's the funded deployer.
