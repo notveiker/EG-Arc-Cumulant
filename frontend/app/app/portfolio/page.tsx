@@ -13,6 +13,7 @@ import { LinkedWalletsCard } from "../_components/LinkedWalletsCard";
 import { fetchPpnPortfolio, ppnRedeem, PpnError, usePpnSigner } from "../_lib/ppn-client";
 import { mergePpnVaults, mergeTranches } from "../_lib/ppn-hydrate";
 import { redeemFromBundle, DepositError } from "../_lib/deposit-client";
+import { friendlyWalletError } from "../_lib/chain";
 import { useCumulant } from "@/lib/tx";
 import { useConfig } from "@/lib/hooks";
 import {
@@ -418,14 +419,10 @@ export default function PortfolioPage() {
       await hydratePortfolio();
       void usdc.refresh();
     } catch (err) {
-      const msg =
-        err instanceof DepositError
-          ? err.message
-          : err instanceof Error
-            ? /user rejected/i.test(err.message)
-              ? "Transaction was rejected in your wallet."
-              : err.message
-            : String(err);
+      // App-level DepositError carries a curated message; everything else
+      // (wallet rejection, contract custom errors like NotSettled) goes through
+      // friendlyWalletError so a settlement-only redeem reads as plain language.
+      const msg = err instanceof DepositError ? err.message : friendlyWalletError(err);
       // "No vault positions" means nothing is on-chain behind this card — it's
       // an orphaned optimistic/virtual position (e.g. a deposit that never
       // landed, or an already-redeemed bundle). Clear it so the stale card
@@ -477,14 +474,7 @@ export default function PortfolioPage() {
       await hydratePortfolio();
       void usdc.refresh();
     } catch (err) {
-      const msg =
-        err instanceof PpnError
-          ? err.message
-          : err instanceof Error
-            ? /user rejected/i.test(err.message)
-              ? "Transaction was rejected in your wallet."
-              : err.message
-            : String(err);
+      const msg = err instanceof PpnError ? err.message : friendlyWalletError(err);
       setRedeemError((prev) => ({ ...prev, [rowKey]: msg }));
     } finally {
       setRedeemBusy(null);
