@@ -378,7 +378,7 @@ function BasketTrendChart({
   history: number[];
   color: string;
 }) {
-  const [range, setRange] = useState<TrendKey>("30D");
+  const [range, setRange] = useState<TrendKey>("1D");
   // Measure the SVG wrapper so the chart fills its box EXACTLY. The previous
   // version set the SVG to width:100% with no height, so the browser sized it
   // from the viewBox aspect ratio — on a wide panel that made the SVG taller
