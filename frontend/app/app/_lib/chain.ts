@@ -66,6 +66,21 @@ export function friendlyWalletError(err: unknown): string {
   if (/insufficient funds|insufficient balance|exceeds balance|transfer amount exceeds/i.test(msg)) {
     return msg.split("\n")[0];
   }
+  // Known protocol custom errors → plain language. These reach the client as a
+  // viem-decoded custom-error name (with the contract ABI) or inside the revert
+  // reason string, so a name match covers both.
+  const CUSTOM_ERRORS: Array<[RegExp, string]> = [
+    [/NotSettled/i, "This position can't be redeemed yet — it opens once the underlying market settles."],
+    [/AlreadySettled/i, "This position has already settled."],
+    [/MarketClosed/i, "This market has closed to new deposits."],
+    [/NotResolved/i, "The underlying market hasn't resolved yet."],
+    [/InsufficientShares/i, "You don't hold enough shares for that amount."],
+    [/DepositTooSmall/i, "Deposit is too small to spread across the tranche legs — try a larger amount."],
+    [/NothingDeposited|NothingToClaim|NothingToReclaim/i, "There's no position here to redeem."],
+  ];
+  for (const [re, friendly] of CUSTOM_ERRORS) {
+    if (re.test(msg)) return friendly;
+  }
   // A contract revert reason is useful — keep it short.
   const revert = /(execution reverted|reverted)[:.]?\s*([^\n]{0,140})/i.exec(msg);
   if (revert && revert[2]?.trim()) return `Transaction reverted: ${revert[2].trim()}`;
