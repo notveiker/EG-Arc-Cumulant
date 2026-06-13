@@ -17,6 +17,7 @@ import { useCallback } from "react";
 import { useAccount, usePublicClient, useWriteContract } from "wagmi";
 import { parseUnits, type Address } from "viem";
 import { useConfig } from "@/lib/hooks";
+import { withWalletTimeout } from "@/lib/tx";
 import { BACKEND_URL } from "./tokens";
 import { unwrap } from "./http";
 import type { WalletSigner } from "./wallet-bridge";
@@ -254,12 +255,14 @@ export function useContinuousEscrow(): EscrowSigner {
       if (!vault) throw new Error("Backend did not return an escrow address.");
       const amount = escrowAmount6dp(prep);
 
-      const hash = await writeContractAsync({
-        address: usdc,
-        abi: escrowErc20Abi,
-        functionName: "transfer",
-        args: [vault, amount],
-      });
+      const hash = await withWalletTimeout(
+        writeContractAsync({
+          address: usdc,
+          abi: escrowErc20Abi,
+          functionName: "transfer",
+          args: [vault, amount],
+        }),
+      );
       await publicClient.waitForTransactionReceipt({ hash });
       return hash;
     },
