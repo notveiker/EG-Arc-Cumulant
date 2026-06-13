@@ -42,6 +42,16 @@ function synthBundles(): BundleSummary[] {
   return out;
 }
 
+/**
+ * Canonical 0-based index of a bundle in the stable synthetic list. The on-chain
+ * baskets/tranches are seeded 1:1 in this same order, so the index IS the on-chain
+ * basket/tranche id — a deterministic mapping, unlike a hash (which collides /
+ * mis-routes deposits to an unrelated product). Returns -1 for an unknown id.
+ */
+export function bundleIndex(id: string): number {
+  return synthBundles().findIndex((b) => b.id === id);
+}
+
 // Bare array (the clients read `(await res.json()) as BundleSummary[]`).
 router.get("/", (_req: Request, res: Response) => res.json(synthBundles()));
 
