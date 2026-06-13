@@ -20,6 +20,7 @@
 import { formatUnits, parseUnits, type Address } from "viem";
 import { publicClient } from "../chain.js";
 import { config, explorerTx, explorerAddress } from "../config.js";
+import { bundleIndex } from "../routes/bundles.js";
 import {
   getBasket,
   getBasketCount,
@@ -127,7 +128,12 @@ export async function resolveBundleToOnchain(bundleId: string): Promise<OnchainO
   try {
     if (vaultConfigured()) {
       const count = await getBasketCount();
-      if (count > 0) basketId = hashBundleId(bundleId) % count;
+      if (count > 0) {
+        // Deterministic 1:1 bundle→basket mapping by canonical index (baskets are
+        // seeded in the same order). Fall back to the FNV hash only for an unknown id.
+        const idx = bundleIndex(bundleId);
+        basketId = (idx >= 0 ? idx : hashBundleId(bundleId)) % count;
+      }
     }
   } catch {
     basketId = null;
