@@ -1832,7 +1832,7 @@ function SellSection({
             }}
           >
             {vaultState === "active"
-              ? "Early exit settles on-chain as your pro-rata share of the vault USDC pool (plus a 0.30% combined exit fee). The “You receive” line is a NAV-based retail estimate; the signed transaction uses the pool ratio."
+              ? "This basket has no on-chain early exit — your position redeems for its pro-rata share of the vault USDC pool once the basket settles at market resolution. The “You receive” line is a NAV-based estimate until then."
               : bookStatus === "loading"
                 ? "Quoting redemption impact from live Polymarket books…"
                 : sellFees.hasLiveBooks

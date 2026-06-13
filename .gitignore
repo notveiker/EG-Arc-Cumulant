@@ -19,6 +19,7 @@ build/
 # Backend runtime data (continuous-distribution pool + position store)
 .distribution-pools.json
 .distribution-positions.json
+.distribution-market-snapshots.json
 
 # Foundry
 contracts/out/
@@ -32,4 +33,3 @@ contracts/broadcast/**/run-*.json
 .DS_Store
 .idea/
 .vscode/
-contracts/broadcast/

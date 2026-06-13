@@ -1048,7 +1048,7 @@ export default function PortfolioPage() {
                         handleRedeem(uuid, labelId, qty);
                       }}
                       disabled={isBusy || !walletReady}
-                      title={matured ? "Redeem at maturity" : "Exit this position early — pro-rata payout, small exit fee"}
+                      title={matured ? "Redeem at maturity" : "Redeems for your share of the vault once the basket settles at resolution"}
                       style={{
                         padding: "7px 16px",
                         fontSize: 12,
@@ -1267,7 +1267,7 @@ export default function PortfolioPage() {
                         })
                       }
                       disabled={isBusy || !walletReady}
-                      title={matured ? "Redeem at maturity" : "Exit this tranche early — pro-rata payout"}
+                      title={matured ? "Redeem at maturity" : "Redeems your tranche shares once the tranche settles at resolution"}
                       style={{
                         padding: "7px 16px",
                         fontSize: 12,
@@ -1362,7 +1362,7 @@ export default function PortfolioPage() {
                       type="button"
                       onClick={() => handleRedeemPpn(rowKey, { vaultIds: v.allVaultIds ?? [v.id], bundleId: v.bundleId })}
                       disabled={isBusy || !walletReady}
-                      title={matured ? "Redeem at maturity" : "Redeem this note early — principal-protected payout"}
+                      title={matured ? "Redeem at maturity" : "Returns your protected principal once the note settles at resolution"}
                       style={{
                         padding: "7px 16px",
                         fontSize: 12,
