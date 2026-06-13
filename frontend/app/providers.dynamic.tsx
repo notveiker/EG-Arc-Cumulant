@@ -40,6 +40,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <DynamicContextProvider
+      theme="dark"
       settings={{
         environmentId: DYNAMIC_ENVIRONMENT_ID,
         walletConnectors: [EthereumWalletConnectors],
