@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 import type { Address } from "viem";
 
 // Load the repo-root `.env` first (a developer's local secrets / overrides),
-// then `.env.shared` (committed, non-secret defaults like the chain + the
-// Polymarket relay) — dotenv does NOT override already-set vars, so `.env`
+// then `.env.shared` (committed, non-secret defaults like the chain) — dotenv
+// does NOT override already-set vars, so `.env`
 // always wins and `.env.shared` only fills the gaps. This lets a fresh clone run
 // with zero local config.
 const __dirname = dirname(fileURLToPath(import.meta.url));

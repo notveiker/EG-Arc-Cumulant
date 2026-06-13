@@ -94,7 +94,7 @@ async function get<T>(path: string): Promise<T> {
 
 export const api = {
   config: () => get<ChainConfig>("/api/config"),
-  markets: () => get<Market[]>("/api/markets"),
+  markets: () => get<Market[]>("/api/markets/onchain"),
   market: (id: number) => get<Market>(`/api/markets/${id}`),
   baskets: () => get<Basket[]>("/api/baskets"),
   basket: (id: number) => get<Basket>(`/api/baskets/${id}`),

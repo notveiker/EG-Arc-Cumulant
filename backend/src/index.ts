@@ -42,6 +42,7 @@ import navRouter from "./routes/nav.js";
 import distributionRouter from "./routes/distribution.js";
 import marketsRouter from "./routes/markets.js";
 import bundlesRouter from "./routes/bundles.js";
+import flowRouter from "./routes/flow.js";
 // (receipts/audit-trail feature removed upstream — mirrors Cumulant b205d60)
 
 const app = express();
@@ -295,6 +296,8 @@ app.use("/api/vaults", vaultsRouter);
 app.use("/api/nav", navRouter);
 app.use("/api/distribution", distributionRouter);
 app.use("/api/portfolio", portfolioRouter);
+// Dynamic Flow: HMAC-verified cross-chain deposit settlement → on-chain deposit gate.
+app.use("/api/flow", flowRouter);
 
 // ── Resolver (server-owned admin role only) ──────────────────────────────────
 // This is the ONLY signing the backend does. User trading is wallet-signed client-side.

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "dynamic": {
+      "type": "http",
+      "url": "https://www.dynamic.xyz/docs/mcp"
+    }
+  }
+}

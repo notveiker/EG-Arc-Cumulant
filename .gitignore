@@ -2,7 +2,7 @@
 .env
 .env.*
 !.env.example
-# .env.shared holds committed, non-secret team defaults (chain + Polymarket relay)
+# .env.shared holds committed, non-secret team defaults (chain config)
 # so a fresh clone runs with zero local config. NEVER put private keys here.
 !.env.shared
 *.key
@@ -32,12 +32,4 @@ contracts/broadcast/**/run-*.json
 .DS_Store
 .idea/
 .vscode/
-
-# ── Excluded from this public release ─────────────────────────────────────────
-# Proprietary models / quant research — kept private, not for the public repo.
-cumulant-correlation-models/
-# Onchain deploy artifacts. The Arc deployment (deployments/5042002.json) is the
-# public source of truth and IS tracked so the backend resolves contracts out of
-# the box. Local Anvil runs (31337.json) and broadcast logs stay untracked.
-contracts/deployments/31337.json
 contracts/broadcast/

@@ -9,6 +9,7 @@ import { bundleById } from "../_lib/bundles";
 import { useSandbox, type BasketPosition } from "../_lib/demo-state";
 import { useActiveWalletAddress, useUsdcBalance, useWalletSigner } from "../_lib/wallet-bridge";
 import { fetchBasketPortfolio, usePbuBalances } from "../_lib/portfolio-client";
+import { LinkedWalletsCard } from "../_components/LinkedWalletsCard";
 import { fetchPpnPortfolio, ppnRedeem, PpnError, usePpnSigner } from "../_lib/ppn-client";
 import { mergePpnVaults, mergeTranches } from "../_lib/ppn-hydrate";
 import { redeemFromBundle, DepositError } from "../_lib/deposit-client";
@@ -403,16 +404,6 @@ export default function PortfolioPage() {
     };
   }, [hydratePortfolio]);
 
-  // Re-hydrate when the tab regains focus, so a write made on another route
-  // (e.g. a sell on a product detail page) doesn't leave a stale/phantom row here.
-  useEffect(() => {
-    const onFocus = () => {
-      void hydratePortfolio();
-    };
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [hydratePortfolio]);
-
   async function handleRedeem(bundleId: string, uiBundleId: string, tokens: number) {
     if (!walletReady || !appWalletAddress) return;
     setRedeemError((prev) => {
@@ -659,6 +650,7 @@ export default function PortfolioPage() {
       ` }} />
       <Header />
       <PageFrame>
+        <LinkedWalletsCard />
         <div className="portfolio-page-head" style={{ display: "flex", alignItems: "end", justifyContent: "space-between", gap: 20, marginBottom: 18, paddingBottom: 14, borderBottom: `0.5px solid ${C.border}` }}>
           <div>
             <div style={{ fontFamily: FM, fontSize: 10, letterSpacing: "0.14em", color: C.tealLight, fontWeight: 700, marginBottom: 8, textTransform: "uppercase" }}>

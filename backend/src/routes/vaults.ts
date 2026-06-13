@@ -121,7 +121,6 @@ function isUsdcSingleAsset(row: LlamaPool): boolean {
   if (row.stablecoin !== true) return false;
   if (typeof row.symbol !== "string") return false;
   if (row.symbol !== "USDC") return false;
-  if (row.symbol.includes("-")) return false;
   return true;
 }
 
