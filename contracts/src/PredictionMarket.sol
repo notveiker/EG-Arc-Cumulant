@@ -8,8 +8,8 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 
 /// @title Cumulant PredictionMarket
 /// @notice USDC-collateralized binary (YES/NO) prediction markets for the Cumulant
-///         protocol on Circle Arc. Collateral is canonical Arc USDC (6 decimals);
-///         there is no mock token. Trading is wallet-signed; resolution is performed
+///         protocol on Circle Arc. Collateral is a configured ERC-20 (6 decimals) — this
+///         Arc testnet deployment uses a freely-mintable Test USDC. Trading is wallet-signed; resolution is performed
 ///         by a trusted resolver (oracle/admin) because Arc's PREVRANDAO is always 0
 ///         and outcomes are real-world events, not on-chain randomness.
 /// @dev    Parimutuel payout: a correct position always recovers its stake and earns

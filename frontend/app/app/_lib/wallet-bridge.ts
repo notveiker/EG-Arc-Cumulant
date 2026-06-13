@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Wallet bridge for the Cumulant app (Circle Arc / EVM via wagmi + RainbowKit).
+ * Wallet bridge for the Cumulant app (Circle Arc / EVM via wagmi + Dynamic).
  *
  * User actions are signed CLIENT-SIDE against the deployed contracts via
  * `useCumulant()` (`@/lib/tx`) — there are no backend-built transactions. This
