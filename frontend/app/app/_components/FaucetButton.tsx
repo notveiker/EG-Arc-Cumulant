@@ -5,7 +5,7 @@ import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { C, FM, BACKEND_URL } from "../_lib/tokens";
 
 /**
- * One-click test-USDC faucet in the header. Mints 10,000 mock USDC to the connected
+ * One-click test-USDC faucet in the header. Mints 10,000 test USDC to the connected
  * Dynamic wallet via the backend (deployer-signed, so the user needs no gas), then pops
  * a bottom toast with a live Arcscan link. Replaces the redundant TESTNET badge — the
  * chain chip already shows the network.
@@ -120,7 +120,7 @@ export function FaucetButton() {
               <span
                 style={{ width: 7, height: 7, borderRadius: "50%", background: C.green, boxShadow: `0 0 8px ${C.green}` }}
               />
-              <span style={{ color: C.textPrimary }}>10,000 mock USDC minted</span>
+              <span style={{ color: C.textPrimary }}>10,000 test USDC minted</span>
               <a
                 href={toast!.explorerUrl}
                 target="_blank"

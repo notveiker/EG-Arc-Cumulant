@@ -42,7 +42,7 @@ contract PredictionMarket is Ownable2Step, ReentrancyGuard {
         uint256 no;
     }
 
-    /// @notice Collateral token: canonical Arc testnet USDC (6 decimals).
+    /// @notice Collateral token: the configured ERC-20 test USDC (6 decimals).
     IERC20 public immutable usdc;
 
     /// @notice Address authorized to resolve markets (the protocol oracle/admin).
