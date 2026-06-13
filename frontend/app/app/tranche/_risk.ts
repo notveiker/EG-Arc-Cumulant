@@ -349,12 +349,20 @@ export function computeOrderRisk(
     convexity *
     profileRisk;
 
-  // Concentration: few effective legs → less diversifiable.
+  // Concentration: few effective legs → less diversifiable. This is a desk
+  // INVENTORY risk premium, so it must scale with how much of the book THIS
+  // order actually consumes — charging it flat per ticket made a $100 senior
+  // clip on a single-dominant-leg basket price ~13% in concentration alone,
+  // tripping the fee gate on trivially-hedgeable retail size. Ramp it on the
+  // same sizeRatio the other size-dependent terms use, with a small floor so a
+  // baseline structural premium remains for any ticket.
   const concScarcity = Math.max(
     0,
     CONC_EFF_LEG_THRESHOLD / Math.max(1, hedge.effLegCount) - 1,
   );
-  const concentrationBps = concScarcity * 50 * convexity * profileRisk;
+  const concSizeWeight = 0.1 + 0.9 * (1 - Math.exp(-3 * sizeRatioClamped));
+  const concentrationBps =
+    concScarcity * 50 * convexity * profileRisk * concSizeWeight;
 
   const totalBps =
     marketImpactBps + warehouseBps + inventoryBps + concentrationBps;
