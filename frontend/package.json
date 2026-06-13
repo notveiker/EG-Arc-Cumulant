@@ -2,6 +2,9 @@
   "name": "cumulant-frontend",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "next dev -p 13200",
     "build": "next build",
