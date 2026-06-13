@@ -8,11 +8,11 @@
  *     collateral. Payoff at the realized outcome x* is  scale * (g(x*)-f(x*)).
  *
  * On-chain settlement (market + outcome are simulated, money is real):
- *   - OPEN  : the wallet signs a tx that escrows the collateral (mUSDC) to the
+ *   - OPEN  : the wallet signs a tx that escrows the collateral (USDC) to the
  *             protocol treasury. The position + a locked-in realized outcome are
  *             recorded server-side, keyed by the open tx hash.
  *   - SETTLE: the protocol pays the realized net (collateral + payoff, clamped
- *             >= 0) back to the trader by minting mUSDC (it holds the treasury
+ *             >= 0) back to the trader by minting USDC (it holds the treasury
  *             cap). Net wallet change == payoff. Profit and loss both reconcile.
  */
 import fs from 'node:fs';
@@ -710,6 +710,8 @@ export interface PreparedOpen {
   sender: string;
   collateral_usdc: number;
   treasury: string;
+  /** Escrow target the client signs `USDC.transfer(vault, collateral)` to (== treasury). */
+  vault: string;
   quote: ContinuousQuote & { market_id: string; question: string; unit: string };
   dry_run: { ok: boolean; status: string; error?: string };
 }
@@ -736,6 +738,7 @@ export async function prepareContinuousOpen(args: {
     sender: args.owner,
     collateral_usdc: quote.collateral_required_usdc,
     treasury,
+    vault: treasury,
     quote,
     dry_run: { ok: true, status: 'success' },
   };

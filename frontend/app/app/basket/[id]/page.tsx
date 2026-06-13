@@ -904,7 +904,8 @@ function BasketBuyPanel({
 
   const canBuy =
     appConnected && hasAmount && !insufficient && !overCap && !txBusy;
-  // Active vaults use on-chain `exit_active` (pool pro-rata); finalized uses `redeem`.
+  // BasketVault has no active early-exit on-chain — `redeem` only succeeds once the basket
+  // is settled (finalized). Gate sell to finalized so it can't revert NotSettled.
   const canSell =
     appConnected &&
     hasSellQty &&
@@ -912,7 +913,7 @@ function BasketBuyPanel({
     !sellOverCap &&
     heldQty > 0 &&
     !txBusy &&
-    vaultState !== "closed";
+    vaultState === "finalized";
 
   // ---- Submit -------------------------------------------------------
   //
