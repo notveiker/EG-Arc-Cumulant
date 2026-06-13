@@ -17,6 +17,7 @@
  */
 import { useEffect, useState } from "react";
 import { DynamicContextProvider } from "@dynamic-labs/sdk-react-core";
+import { useTheme } from "@/lib/theme";
 import { EthereumWalletConnectors } from "@dynamic-labs/ethereum";
 import { DynamicWagmiConnector } from "@dynamic-labs/wagmi-connector";
 import { WagmiProvider } from "wagmi";
@@ -31,6 +32,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+  // Follow the app's light/dark toggle so Dynamic's widget + modal match the chrome.
+  const { theme } = useTheme();
 
   // SSR and the first client render both produce this identical static shell (no Dynamic),
   // so there is nothing for React to mismatch. Dynamic mounts on the client after hydration.
@@ -40,7 +43,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <DynamicContextProvider
-      theme="dark"
+      theme={theme}
       settings={{
         environmentId: DYNAMIC_ENVIRONMENT_ID,
         walletConnectors: [EthereumWalletConnectors],
