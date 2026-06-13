@@ -121,7 +121,10 @@ contract ProtectedNote is ReentrancyGuard, Ownable {
         if (amount == 0) revert ZeroAmount();
         if (note.settled) revert AlreadySettled();
         PredictionMarket.Market memory m = market.getMarket(note.marketId);
-        if (m.resolved) revert MarketClosed();
+        // Stop accepting principal once trading closes — otherwise a depositor could
+        // enter after the outcome is observable but before resolve() and capture a
+        // pro-rata coupon share risk-free, diluting honest early depositors.
+        if (m.resolved || block.timestamp >= m.closeTime) revert MarketClosed();
 
         usdc.safeTransferFrom(msg.sender, address(this), amount);
         _principal[noteId][msg.sender] += amount;
