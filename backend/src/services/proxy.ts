@@ -80,48 +80,14 @@ export function polymarketDispatcher(): Dispatcher | undefined {
 }
 
 export function proxyConfigured(): boolean {
-  return Boolean(process.env.POLYMARKET_RELAY_URL?.trim()) || Boolean(polymarketDispatcher());
+  return Boolean(polymarketDispatcher());
 }
 
 /**
  * `fetch` for Polymarket — transparently routed through POLYMARKET_PROXY_URL when
  * set, otherwise the platform fetch. Returns a standard web `Response`.
  */
-/**
- * Optional RELAY mode for restrictive networks (e.g. work wifi that blocks
- * VPN/Tor). Set POLYMARKET_RELAY_URL to a plain HTTPS endpoint that fetches a
- * target URL from a non-US region and returns its body — reached over normal
- * HTTPS:443 so it passes corporate firewalls. The target URL is URL-encoded into
- * the `{url}` placeholder (or appended if no placeholder). Works with hosted
- * scraping APIs (ScraperAPI / ScrapingAnt / ZenRows — pick country=EU) or a
- * self-hosted relay (e.g. a Vercel function pinned to a EU region). Takes
- * precedence over POLYMARKET_PROXY_URL.
- *
- *   ScraperAPI : https://api.scraperapi.com/?api_key=KEY&country_code=eu&url={url}
- *   ScrapingAnt: https://api.scrapingant.com/v2/general?x-api-key=KEY&proxy_country=DE&browser=false&url={url}
- *   self-host  : https://my-relay.vercel.app/?url={url}
- */
-function relayTarget(url: string): string | null {
-  const relay = process.env.POLYMARKET_RELAY_URL?.trim();
-  if (!relay) return null;
-  const enc = encodeURIComponent(url);
-  return relay.includes("{url}") ? relay.replace("{url}", enc) : relay + enc;
-}
-
-let _relayLogged = false;
-
 export async function proxiedFetch(url: string, init?: RequestInit): Promise<Response> {
-  const relayed = relayTarget(url);
-  if (relayed) {
-    if (!_relayLogged) {
-      console.log("[proxy] Polymarket requests routed via RELAY (POLYMARKET_RELAY_URL)");
-      _relayLogged = true;
-    }
-    // The relay fetches the target itself + sets its own headers; we only carry
-    // the abort signal (timeout). It returns the target's body verbatim.
-    const signal = (init as { signal?: AbortSignal } | undefined)?.signal;
-    return fetch(relayed, signal ? { signal } : undefined);
-  }
   const dispatcher = polymarketDispatcher();
   if (!dispatcher) return fetch(url, init);
   return undiciFetch(url, {

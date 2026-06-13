@@ -741,14 +741,6 @@ export async function prepareContinuousOpen(args: {
   };
 }
 
-async function txHashSucceeded(txHash: string): Promise<boolean> {
-  try {
-    return (await confirmTxHash(txHash)).ok;
-  } catch {
-    return false;
-  }
-}
-
 /** Record the position after the wallet has executed the escrow tx. */
 export async function confirmContinuousOpen(args: {
   owner: string;
@@ -759,8 +751,19 @@ export async function confirmContinuousOpen(args: {
   tx_hash: string;
 }): Promise<ContinuousPosition> {
   if (!args.tx_hash) throw new Error('tx_hash is required');
-  if (!(await txHashSucceeded(args.tx_hash))) {
+  // Idempotency: a tx hash backs exactly one position — never overwrite an existing
+  // one (re-posting the same hash with different targets must not mint a second).
+  const existing = store.get(args.tx_hash);
+  if (existing) return existing;
+  // Owner-binding: verify the escrow tx landed AND was signed by the claiming
+  // wallet, not just that *some* tx with this hash succeeded.
+  const conf = await confirmTxHash(args.tx_hash, args.owner);
+  if (!conf.ok) {
     throw new Error('Open transaction not found or did not succeed on-chain.');
+  }
+  const sender = (conf.event?.owner as string | undefined)?.toLowerCase();
+  if (sender && sender !== args.owner.toLowerCase()) {
+    throw new Error('Open transaction was not signed by the claiming wallet.');
   }
   const quote = quoteContinuous(args);
   const realized = drawNormal(quote.market_mu, quote.market_sigma, args.tx_hash);

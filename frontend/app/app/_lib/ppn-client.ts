@@ -451,8 +451,28 @@ interface OnchainTarget {
 function toBigintAmount(value: string | number | null | undefined): bigint | null {
   if (value == null || value === "") return null;
   if (typeof value === "number") return parseUnits(String(value), 6);
-  // String: treat as already-6dp base units.
-  return BigInt(value);
+  // String: already-6dp base units. Tolerate a stray decimal/scientific form
+  // instead of letting BigInt() throw an opaque SyntaxError.
+  const s = value.trim();
+  if (/^\d+$/.test(s)) return BigInt(s);
+  const n = Number(s);
+  if (!Number.isFinite(n)) throw new PpnError(`Invalid base-unit amount: ${value}`, 0);
+  return BigInt(Math.round(n));
+}
+
+/**
+ * The on-chain TrancheVault models only senior/junior (a single `bool senior`).
+ * Map the UI tranche kind to that flag, refusing "mezzanine" rather than silently
+ * routing it into the junior (first-loss) slice it was never priced for.
+ */
+function trancheSeniorFlag(kind: "senior" | "mezzanine" | "junior"): boolean {
+  if (kind === "mezzanine") {
+    throw new PpnError(
+      "The mezzanine tranche isn't settleable on-chain yet — the vault holds only senior and junior slices. Choose senior or junior.",
+      0,
+    );
+  }
+  return kind === "senior";
 }
 
 function toPositionId(value: number | string | null | undefined): number | null {
@@ -521,7 +541,7 @@ export function usePpnSigner(): { signDeposit: PpnSigner; signRedeem: PpnSigner 
         throw new PpnError("Backend did not return a deposit amount.", 0, prep);
       }
       if (t.trancheKind != null) {
-        return depositTranche(t.vault, usdc, t.id, amount, t.trancheKind === "senior");
+        return depositTranche(t.vault, usdc, t.id, amount, trancheSeniorFlag(t.trancheKind));
       }
       return depositNote(t.vault, usdc, t.id, amount);
     },
@@ -533,7 +553,7 @@ export function usePpnSigner(): { signDeposit: PpnSigner; signRedeem: PpnSigner 
       const t = resolveOnchainTarget(prep, cfg);
       if (t.trancheKind != null) {
         const shares = t.shares ?? 0n;
-        return redeemTranche(t.vault, t.id, shares, t.trancheKind === "senior");
+        return redeemTranche(t.vault, t.id, shares, trancheSeniorFlag(t.trancheKind));
       }
       return redeemNote(t.vault, t.id);
     },

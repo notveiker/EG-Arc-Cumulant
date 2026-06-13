@@ -580,7 +580,11 @@ export async function confirmTxHash(
       explorer_url: explorerTx(trimmed),
       block_number: Number(receipt.blockNumber),
       usdc_delta: delta,
-      event: undefined,
+      // Owner-binding: in this non-custodial EOA flow the tx sender IS the wallet
+      // that signed the deposit/redeem, so surfacing it lets the confirm routes
+      // reject a real hash claimed by a different wallet (previously always undefined,
+      // which made ownerMismatch() inert and the confirm path fail-open).
+      event: receipt.from ? { owner: receipt.from } : undefined,
     };
   } catch {
     // Receipt not yet indexed / not found.
