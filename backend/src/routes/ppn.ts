@@ -42,11 +42,13 @@ import {
   resolveBundleToTranche,
   resolveRedeemNote,
   resolveRedeemTranche,
+  listOnchainPpnHoldings,
   VAULT,
 } from "../services/onchain.js";
 import { quoteTranches } from "../services/tranching.js";
 import { allocateNote } from "../services/ppn-allocator.js";
 import type { PPNVault } from "../types.js";
+import { bundleIdAtIndex } from "./bundles.js";
 
 const router = Router();
 
@@ -563,19 +565,58 @@ router.post("/onchain/close/confirm", (req, res) =>
 // ──────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Reconstruct a minimal vault for an on-chain position that has no Supabase row
+ * (Supabase unconfigured). The portfolio surfaces such positions with synthetic
+ * ids (`note-{i}` / `tranche-{i}-{kind}`); here we read the live on-chain
+ * principal/shares so the sell RFQ can still price + offer them. Returns null if
+ * the id isn't synthetic, the wallet is unknown, or the position is empty.
+ */
+async function reconstructOnchainSellVault(
+  id: string,
+  wallet: string,
+): Promise<PPNVault | null> {
+  if (!wallet) return null;
+  const note = /^note-(\d+)$/.exec(id);
+  const tranche = /^tranche-(\d+)-(senior|junior)$/.exec(id);
+  const maturity_date = new Date(Date.now() + 30 * 86_400_000).toISOString();
+  if (note) {
+    const bundle_id = bundleIdAtIndex(Number(note[1]));
+    if (!bundle_id) return null;
+    const ref = await resolveRedeemNote(bundle_id, wallet).catch(() => null);
+    const principal = ref ? Number(ref.principal6dp) / 1e6 : 0;
+    if (!(principal > 0)) return null;
+    return { id, bundle_id, tranche_kind: null, principal_usdc: principal, price_per_token: 1, maturity_date } as PPNVault;
+  }
+  if (tranche) {
+    const bundle_id = bundleIdAtIndex(Number(tranche[1]));
+    if (!bundle_id) return null;
+    const kind = tranche[2] as TrancheKind;
+    const ref = await resolveRedeemTranche(bundle_id, wallet, kind).catch(() => null);
+    const principal = ref ? Number(ref.shares6dp) / 1e6 : 0;
+    if (!(principal > 0)) return null;
+    return { id, bundle_id, tranche_kind: kind, principal_usdc: principal, price_per_token: 1, maturity_date } as PPNVault;
+  }
+  return null;
+}
+
+/**
  * Secondary-market RFQ for tranche positions, priced by the REAL `quoteTranches`
- * engine (no hardcoded haircut). Requires DB bundle data to derive the outcome
- * distribution; returns `missing` for vaults it can't resolve.
+ * engine (no hardcoded haircut). Resolves from the Supabase row when present, else
+ * reconstructs the position from on-chain state (so it works without Supabase);
+ * returns `missing` only for ids it can resolve from neither.
  */
 router.post("/tranche/sell/rfq", async (req: Request, res: Response) => {
   try {
-    const body = (req.body ?? {}) as { vault_ids?: unknown };
+    const body = (req.body ?? {}) as { vault_ids?: unknown; wallet_address?: unknown };
+    const wallet = typeof body.wallet_address === "string" ? body.wallet_address.trim() : "";
     const ids = Array.isArray(body.vault_ids)
       ? body.vault_ids.filter((v): v is string => typeof v === "string" && !!v)
       : [];
     const quotes = await Promise.all(
       ids.map(async (id) => {
-        const vault = await getPPNVaultById(id).catch(() => null);
+        const vault =
+          (await getPPNVaultById(id).catch(() => null)) ??
+          (await reconstructOnchainSellVault(id, wallet).catch(() => null));
         if (!vault)
           return { vault_id: id, status: "missing" as const, error: "Vault not found" };
         const bundle = await getBundleById(vault.bundle_id).catch(() => null);
@@ -656,15 +697,68 @@ router.get("/portfolio/:walletAddress", async (req: Request, res: Response) => {
       });
     }
 
-    const [state, shares, dbVaults] = await Promise.all([
+    const [state, shares, dbVaults, onchain] = await Promise.all([
       readVaultState(),
       listShares(walletAddress),
       getPPNVaultsByWallet(walletAddress).catch(() => [] as PPNVault[]),
+      listOnchainPpnHoldings(walletAddress).catch(() => []),
     ]);
 
-    const ppnShares = shares.filter((s) => s.label.startsWith("ppn:"));
     const DAY = 86_400_000;
     const now = Date.now();
+
+    // PRIMARY source: real on-chain ProtectedNote / TrancheVault holdings. The
+    // DB-backed ppn_vaults table is empty when Supabase is unconfigured, so
+    // without this the portfolio (and the tranche sell surface) showed $0.00 for
+    // positions that genuinely exist on-chain. Enrich each holding with the
+    // matching Supabase row's term/apy metadata when one exists.
+    if (onchain.length > 0) {
+      const rows = onchain.map((h) => {
+        const dbV = dbVaults.find(
+          (v) => v.bundle_id === h.bundle_id && (v.tranche_kind ?? null) === h.tranche_kind,
+        );
+        const value = h.principal_usdc * state.share_price;
+        const createdMs = dbV?.created_at ? new Date(dbV.created_at).getTime() : now;
+        const maturityMs = dbV?.maturity_date
+          ? new Date(dbV.maturity_date).getTime()
+          : now + 30 * DAY; // 30-day default term (matches the deposit default) when no DB row
+        return {
+          share_id: h.vault_id,
+          vault_id: h.vault_id,
+          bundle_id: h.bundle_id,
+          tranche_kind: h.tranche_kind,
+          // A tranche row must carry a tranche signal so the client buckets it as
+          // a tranche (looksLikeTranche); price_per_token = 1 keeps qty == principal.
+          price_per_token: h.tranche_kind ? (dbV?.price_per_token ?? 1) : null,
+          principal_usdc: h.principal_usdc,
+          yield_deployed_usdc: 0,
+          current_value: value,
+          accrued_yield: value - h.principal_usdc,
+          status: "active",
+          created_at: dbV?.created_at ?? new Date(createdMs).toISOString(),
+          maturity_date: dbV?.maturity_date ?? new Date(maturityMs).toISOString(),
+          days_elapsed: Math.max(0, (now - createdMs) / DAY),
+          days_remaining: Math.max(0, (maturityMs - now) / DAY),
+          estimated_apy: dbV?.estimated_apy ?? 0.08,
+        };
+      });
+      const totalPrincipal = rows.reduce((s, r) => s + r.principal_usdc, 0);
+      const totalValue = rows.reduce((s, r) => s + r.current_value, 0);
+      return ok(res, {
+        wallet_address: walletAddress,
+        share_price: state.share_price,
+        vaults: rows,
+        summary: {
+          total_vaults: rows.length,
+          total_principal: totalPrincipal,
+          total_accrued_yield: totalValue - totalPrincipal,
+          total_value: totalValue,
+          principal_protected: true,
+        },
+      });
+    }
+
+    const ppnShares = shares.filter((s) => s.label.startsWith("ppn:"));
 
     // On-chain ppn-labeled shares are the source of truth for live principal. If
     // the chain exposes none (the EVM basket vault labels by basket name, not

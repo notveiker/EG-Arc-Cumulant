@@ -20,7 +20,7 @@
 import { formatUnits, parseUnits, type Address } from "viem";
 import { publicClient } from "../chain.js";
 import { config, explorerTx, explorerAddress } from "../config.js";
-import { bundleIndex } from "../routes/bundles.js";
+import { bundleIndex, bundleIdAtIndex } from "../routes/bundles.js";
 import {
   getBasket,
   getBasketCount,
@@ -253,6 +253,65 @@ export async function resolveRedeemTranche(
   }));
   const shares = senior ? balances.senior : balances.junior;
   return { ...ref, shares6dp: shares.toString(), senior };
+}
+
+/** A real on-chain ProtectedNote / TrancheVault holding for a wallet. */
+export interface OnchainPpnHolding {
+  /** Synthetic id the UI keys on: `note-{id}` or `tranche-{id}-{kind}`. */
+  vault_id: string;
+  /** Representative bundle id for display (reverse of the canonical index map). */
+  bundle_id: string;
+  /** "senior" | "junior" for tranche legs; null for a protected note. */
+  tranche_kind: "senior" | "junior" | null;
+  /** Owner's principal / shares in this position, display USDC. */
+  principal_usdc: number;
+}
+
+/**
+ * Read a wallet's REAL on-chain note + tranche positions straight from the
+ * ProtectedNote / TrancheVault contracts. This is what makes PPN/tranche
+ * positions visible WITHOUT Supabase: the DB-backed `ppn_vaults` table is empty
+ * when Supabase is unconfigured, but the positions exist on-chain. Returns [] if
+ * the contracts aren't configured.
+ */
+export async function listOnchainPpnHoldings(owner: string): Promise<OnchainPpnHolding[]> {
+  if (!vaultConfigured()) return [];
+  const addr = owner as Address;
+  const out: OnchainPpnHolding[] = [];
+
+  const noteCount = await getNoteCount().catch(() => 0);
+  const notePrincipals = await Promise.all(
+    Array.from({ length: noteCount }, (_, i) =>
+      notePrincipalRaw(i, addr).then((p) => ({ i, p })).catch(() => ({ i, p: 0n })),
+    ),
+  );
+  for (const { i, p } of notePrincipals) {
+    if (p > 0n) {
+      out.push({
+        vault_id: `note-${i}`,
+        bundle_id: bundleIdAtIndex(i) ?? `note-${i}`,
+        tranche_kind: null,
+        principal_usdc: Number(p) / 1e6,
+      });
+    }
+  }
+
+  const trancheCount = await getTrancheCount().catch(() => 0);
+  const trancheShares = await Promise.all(
+    Array.from({ length: trancheCount }, (_, i) =>
+      trancheSharesRaw(i, addr).then((s) => ({ i, ...s })).catch(() => ({ i, senior: 0n, junior: 0n })),
+    ),
+  );
+  for (const { i, senior, junior } of trancheShares) {
+    const bid = bundleIdAtIndex(i) ?? `tranche-${i}`;
+    if (senior > 0n) {
+      out.push({ vault_id: `tranche-${i}-senior`, bundle_id: bid, tranche_kind: "senior", principal_usdc: Number(senior) / 1e6 });
+    }
+    if (junior > 0n) {
+      out.push({ vault_id: `tranche-${i}-junior`, bundle_id: bid, tranche_kind: "junior", principal_usdc: Number(junior) / 1e6 });
+    }
+  }
+  return out;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
