@@ -91,6 +91,18 @@ contract ProtectedNoteTest is Test {
         assertEq(notes.redeem(id), 100 * USDC1);
     }
 
+    /// Deposits are refused once the underlying market's trading window closes,
+    /// so no one can enter risk-free after the outcome is observable and skim coupon.
+    function test_RevertWhen_DepositAfterClose() public {
+        (uint256 id, uint256 m0) = _note(50);
+        vm.prank(ext);
+        pm.buy(m0, PredictionMarket.Side.No, 50 * USDC1);
+        vm.warp(closeTime);
+        vm.prank(alice);
+        vm.expectRevert(ProtectedNote.MarketClosed.selector);
+        notes.deposit(id, 100 * USDC1);
+    }
+
     function test_CouponSplitProRata() public {
         (uint256 id, uint256 m0) = _note(60);
         vm.prank(ext);

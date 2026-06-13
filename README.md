@@ -79,24 +79,25 @@ cd ../frontend && npm install    # .env.local: NEXT_PUBLIC_CHAIN=local
 npm run dev                      # http://localhost:13200
 ```
 
-Deploy to **Arc testnet** instead: fund `DEPLOYER_PRIVATE_KEY` at
-[faucet.circle.com](https://faucet.circle.com), run `make deploy-arc`, and set
-`CUMULANT_CHAIN=arc` / `NEXT_PUBLIC_CHAIN=arc`. Arc uses canonical USDC at `0x3600…0000` as both
-collateral and gas.
+Deploy to **Arc testnet** instead: fund `DEPLOYER_PRIVATE_KEY` with a little native USDC for gas at
+[faucet.circle.com](https://faucet.circle.com), run `make deploy-arc-mock`, and set
+`CUMULANT_CHAIN=arc` / `NEXT_PUBLIC_CHAIN=arc`. `deploy-arc-mock` collateralizes the suite in a
+freely-mintable **Test USDC** so demos aren't capped by the $20 faucet; `make deploy-arc` instead
+uses Arc's canonical USDC at `0x3600…0000` as both collateral and gas.
 
-Deploy the **full four-product suite to Arc testnet** with `make deploy-arc`, then record your own
-deployed addresses here ([explorer](https://testnet.arcscan.app)):
+The **full four-product suite is live on Arc testnet** ([explorer](https://testnet.arcscan.app)):
 
 | Contract | Address |
 | --- | --- |
-| PredictionMarket | `<set after deploy>` |
-| BasketVault | `<set after deploy>` |
-| TrancheVault | `<set after deploy>` |
-| ProtectedNote | `<set after deploy>` |
+| PredictionMarket | `0xB6dD53f568e2d56AaE5095aD057346e4A063a877` |
+| BasketVault | `0x1c2Af09997DC9A7985cB59B1f5F7533F17c3e75d` |
+| TrancheVault | `0xCc44C4f3b128b4781108266380a2595d89D0CBdf` |
+| ProtectedNote | `0xe3cDD4e5082cD9950B7561b6A9744DB9C1D5430A` |
+| Test USDC (collateral — freely mintable) | `0x4a929c93ED1B23018EA0277883C7BbA5fbf2fBbF` |
 
-`make deploy-arc` writes `contracts/deployments/<chainId>.json` (gitignored) and seeds the
-markets/basket/tranche via forge, then creates the note via `cast` (Arc's USDC routes
-`transferFrom` through a native precompile that forge's local script EVM can't execute).
+Mint test collateral with no cap — `faucet(uint256)` / `mint(address,uint256)` on the Test USDC,
+`redeem(uint256)` to burn. Full addresses, tx hashes, and the faucet command are in
+[`contracts/DEPLOYMENT.md`](contracts/DEPLOYMENT.md).
 
 ## Verification
 
