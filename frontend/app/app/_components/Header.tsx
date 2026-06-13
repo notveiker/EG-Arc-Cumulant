@@ -4,7 +4,7 @@ import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ConnectButton } from "./ConnectButton";
-import { TestnetBadge } from "./TestnetBadge";
+import { FaucetButton } from "./FaucetButton";
 import { C, FD } from "../_lib/tokens";
 import { ThemeToggle } from "../_lib/theme";
 
@@ -122,7 +122,7 @@ export function Header() {
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
           <ThemeToggle />
-          <TestnetBadge />
+          <FaucetButton />
           <ConnectButton variant="header" />
         </div>
       </header>
