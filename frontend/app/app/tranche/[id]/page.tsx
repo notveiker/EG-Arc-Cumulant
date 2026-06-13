@@ -22,7 +22,6 @@ import {
   computeBasketStats,
   quoteTranchesFromStats,
   quoteTrancheOrder,
-  betaShapeMatching,
   type BasketStats,
   type TrancheQuote,
   type TrancheKind,
@@ -515,38 +514,33 @@ function DistributionChart({
   const plotW = Math.max(1, W - padL - padR);
   const plotH = Math.max(1, H - padT - padB);
 
-  // Beta(α,β) shape whose first two moments match the basket. The
-  // Normal approximation we used previously produces the same bell
-  // shape for every basket since its tail always extends; Beta is
-  // bounded to [0,1] and bends correctly toward the mean.
-  const shape = betaShapeMatching(mu, Math.max(1e-6, sigma));
+  // Render a moment-matched NORMAL (Gaussian) density — a smooth hump centred at
+  // μ with spread σ, clipped to the plot window. We previously used a moment-
+  // matched Beta, but Beta turns boundary-lopsided for extreme baskets: it
+  // diverges to ∞ at x=0 for a low-probability basket (μ≈3% → a 1px spike + flat
+  // line) and crams against x=1 for a high-probability one (μ≈94% → a curve
+  // mashed into the right edge with dead space on the left). A clipped Normal
+  // stays smooth and FILLS the window for every basket — a left-leaning hump for
+  // low μ, a centred bell for mid, a right-leaning hump for high — while still
+  // encoding the basket's real (μ, σ).
+  const shape = (x: number) =>
+    Math.exp(-0.5 * ((x - mu) / sigma) ** 2) / (sigma * Math.sqrt(2 * Math.PI));
 
-  // Sample 400 points across the full axis so the skew on HIGH / LOW
-  // baskets renders smoothly. Keep each density so we can pick a ROBUST
-  // normaliser below (and avoid re-evaluating the shape).
+  // Sample across the window. A Gaussian's peak is at μ (interior to μ±3σ) with no
+  // boundary singularity, so the global max IS the true peak — normalise by it
+  // directly, no clamp artefacts.
   const N = 400;
   const pts: Array<{ x: number; y: number; val: number; d: number }> = [];
+  let maxD = 0;
   for (let i = 0; i <= N; i++) {
     const val = lo + (span * i) / N;
-    pts.push({ x: padL + (plotW * i) / N, y: 0, val, d: shape(val) });
+    const d = shape(val);
+    pts.push({ x: padL + (plotW * i) / N, y: 0, val, d });
+    if (d > maxD) maxD = d;
   }
-
-  // A moment-matched Beta with α<1 or β<1 has an integrable SINGULARITY at the
-  // 0 / 1 boundary — e.g. a low-probability basket (μ≈4%, σ≈6.8% → α≈0.3) blows
-  // up at x=0. Normalising by that raw peak squashed the whole distribution to a
-  // flat line beneath a 1px spike. So take the max over the INTERIOR only
-  // (excluding the outer 8% where a boundary singularity lives) and clamp every
-  // height to [0,1]. A genuine interior mode (a well-formed bell) never falls in
-  // that margin, so bell-shaped baskets are unaffected; J-shaped ones now show
-  // their body with the spike flat-topped at the chart ceiling.
-  const edge = Math.floor(N * 0.08);
-  let maxD = 0;
-  for (let i = edge; i <= N - edge; i++) if (pts[i].d > maxD) maxD = pts[i].d;
-  if (!(maxD > 0)) for (const p of pts) if (p.d > maxD) maxD = p.d; // degenerate fallback
-  const denom = Math.max(1e-9, maxD);
+  const normDenom = Math.max(1e-9, maxD);
   for (const p of pts) {
-    const h = Math.min(1, p.d / denom);
-    p.y = padT + (1 - h) * plotH;
+    p.y = padT + (1 - Math.min(1, p.d / normDenom)) * plotH;
   }
 
   // Convert an outcome value to an x-coordinate in the plot.
@@ -608,7 +602,7 @@ function DistributionChart({
             textTransform: "uppercase",
           }}
         >
-          Outcome distribution · Beta(α, β) moment-matched
+          Outcome distribution · Normal moment-matched
         </span>
         <span
           style={{
