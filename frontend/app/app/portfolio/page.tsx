@@ -403,6 +403,16 @@ export default function PortfolioPage() {
     };
   }, [hydratePortfolio]);
 
+  // Re-hydrate when the tab regains focus, so a write made on another route
+  // (e.g. a sell on a product detail page) doesn't leave a stale/phantom row here.
+  useEffect(() => {
+    const onFocus = () => {
+      void hydratePortfolio();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [hydratePortfolio]);
+
   async function handleRedeem(bundleId: string, uiBundleId: string, tokens: number) {
     if (!walletReady || !appWalletAddress) return;
     setRedeemError((prev) => {

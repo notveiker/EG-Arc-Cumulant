@@ -257,8 +257,8 @@ export function History({ walletAddress, connected }: HistoryProps) {
     if (!rows || rows.length === 0) {
       return (
         <EmptyState
-          title="No transactions yet"
-          subtitle="Your buys, sells, and divestments will appear here automatically."
+          title="No transactions to show"
+          subtitle="Buys, sells and divests appear here once the history ledger is connected. Your open positions are always on the Overview tab."
         />
       );
     }

@@ -34,7 +34,7 @@ import {
   DepositError,
 } from "../../_lib/deposit-client";
 import { usePbuBalances } from "../../_lib/portfolio-client";
-import { groupVirtualByUiBundle } from "../../_lib/virtual-positions";
+import { groupVirtualByUiBundle, clearVirtualPositionsByUiBundleId } from "../../_lib/virtual-positions";
 import { fetchVaultPrice } from "../../../lib/api";
 
 type ResolvedBasket =
@@ -979,6 +979,11 @@ function BasketBuyPanel({
           payoutUsdc: result.prepare.expected_usdc,
         });
         setSellQtyInput("");
+        // Full exit: drop the local (virtual) position so the basket card doesn't
+        // linger as a phantom after the sell. Mirrors the Portfolio page's redeem.
+        if (activeAddress && resolvedBundleUuid && sellQty >= heldQty - 1e-6) {
+          clearVirtualPositionsByUiBundleId(activeAddress, resolvedBundleUuid, bundle.id);
+        }
         void usdc.refresh();
         void pbuBalances.refresh();
       } catch (err) {
