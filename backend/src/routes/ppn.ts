@@ -52,6 +52,14 @@ const ok = <T>(res: Response, data: T) => res.json({ ok: true, data });
 const fail = (res: Response, status: number, error: string) =>
   res.status(status).json({ ok: false, error });
 
+/** The on-chain tx sender must match the wallet claiming the deposit/redeem.
+ *  confirmTxHash() surfaces the sender as event.owner (= receipt.from), so this
+ *  rejects a real, successful tx hash replayed/claimed by a different wallet. */
+function ownerMismatch(event: Record<string, unknown> | undefined, wallet?: string): boolean {
+  const owner = (event?.owner as string | undefined)?.toLowerCase();
+  return Boolean(owner && wallet && owner !== wallet.toLowerCase());
+}
+
 /** Sanitize errors so internal RPC/viem/db details never leak to clients. */
 function safeError(e: unknown): string {
   if (!(e instanceof Error)) return "internal error";
@@ -260,6 +268,10 @@ router.post("/onchain/confirm", async (req: Request, res: Response) => {
 
     const c = await confirmTxHash(signature, wallet_address);
     if (!c.ok) return fail(res, 400, `Arc transaction not confirmed: ${c.status}`);
+    // Owner-binding: reject a real tx hash claimed by a different wallet.
+    if (ownerMismatch(c.event, wallet_address)) {
+      return fail(res, 403, "Tx owner does not match wallet_address");
+    }
 
     try {
       if (vault_id)
@@ -413,6 +425,10 @@ async function confirmCloseHandler(req: Request, res: Response, status: string) 
 
   const c = await confirmTxHash(signature, wallet_address);
   if (!c.ok) return fail(res, 400, `Arc transaction not confirmed: ${c.status}`);
+  // Owner-binding: reject a real tx hash claimed by a different wallet.
+  if (ownerMismatch(c.event, wallet_address)) {
+    return fail(res, 403, "Tx owner does not match wallet_address");
+  }
 
   // The redeem's share id is the on-chain basket reference, not the Supabase row
   // id, so resolve the active note/tranche vault by (wallet, bundle) to mark it
