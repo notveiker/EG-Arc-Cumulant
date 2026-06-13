@@ -15,7 +15,7 @@
  * We render an SSR-stable placeholder until mount, then mount the Dynamic→wagmi tree on the
  * client only — eliminating the hydration mismatch / dev error overlay.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DynamicContextProvider } from "@dynamic-labs/sdk-react-core";
 import { useTheme } from "@/lib/theme";
 import { EthereumWalletConnectors } from "@dynamic-labs/ethereum";
@@ -35,6 +35,22 @@ export function Providers({ children }: { children: React.ReactNode }) {
   // Follow the app's light/dark toggle so Dynamic's widget + modal match the chrome.
   const { theme } = useTheme();
 
+  // STABLE settings identity. Everything here is a module constant, so memoise with
+  // empty deps: passing a fresh `settings` object (and a fresh connectors array) on
+  // every render makes the Dynamic SDK re-initialise its connectors — including the
+  // embedded MPC websocket — which spams reconnects and gets the signer rate-limited
+  // (HTTP 429), so wallet-signed writes hang waiting for an MPC co-sign that never
+  // returns. A constant reference keeps the SDK initialised exactly once.
+  const settings = useMemo(
+    () => ({
+      environmentId: DYNAMIC_ENVIRONMENT_ID,
+      walletConnectors: [EthereumWalletConnectors],
+      // Arc testnet + Anvil aren't in Dynamic's default list — declare them here.
+      overrides: { evmNetworks: dynamicEvmNetworks },
+    }),
+    [],
+  );
+
   // SSR and the first client render both produce this identical static shell (no Dynamic),
   // so there is nothing for React to mismatch. Dynamic mounts on the client after hydration.
   if (!mounted) {
@@ -44,12 +60,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <DynamicContextProvider
       theme={theme}
-      settings={{
-        environmentId: DYNAMIC_ENVIRONMENT_ID,
-        walletConnectors: [EthereumWalletConnectors],
-        // Arc testnet + Anvil aren't in Dynamic's default list — declare them here.
-        overrides: { evmNetworks: dynamicEvmNetworks },
-      }}
+      settings={settings}
     >
       <WagmiProvider config={dynamicWagmiConfig}>
         <QueryClientProvider client={queryClient}>
