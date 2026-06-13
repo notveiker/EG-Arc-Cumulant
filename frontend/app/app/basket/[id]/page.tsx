@@ -374,9 +374,9 @@ const HOW_IT_WORKS: Array<{ num: string; title: string; body: string }> = [
   },
   {
     num: "03",
-    title: "Exit on your terms",
+    title: "Redeem at settlement",
     body:
-      "Redeem PBU at live NAV any time, or use it as collateral in Risk Slices, Protected Notes, or lending to build structured positions.",
+      "PBU units redeem for their share of the vault once the basket settles at market resolution — live NAV is an estimate until then. Meanwhile, use PBU as collateral in Risk Slices, Protected Notes, or lending to build structured positions.",
   },
 ];
 

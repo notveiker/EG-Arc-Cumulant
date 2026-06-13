@@ -14,9 +14,10 @@ as a reversible fallback.
   `.env.example`.
 - **Config module**: `frontend/lib/dynamic.ts` — environment id, Arc-testnet +
   Anvil custom EVM networks, and a wagmi config for the Dynamic path.
-- **Provider scaffold**: `frontend/app/providers.dynamic.tsx` — a drop-in
-  alternative to `app/providers.tsx`, ordered `DynamicContextProvider →
-  WagmiProvider → QueryClientProvider → DynamicWagmiConnector`.
+- **Provider (LIVE)**: `frontend/app/providers.dynamic.tsx` — the active provider
+  booted by `app/layout.tsx`, ordered `DynamicContextProvider → WagmiProvider →
+  QueryClientProvider → DynamicWagmiConnector`. The widget is rendered via
+  `app/app/_components/ConnectButton.tsx` (`<DynamicWidget variant="dropdown" />`).
 - **Docs MCP for Claude Code**: `.mcp.json` points Claude Code at the live
   Dynamic docs (`https://www.dynamic.xyz/docs/mcp`).
 
@@ -32,27 +33,24 @@ as a reversible fallback.
    (`NEXT_PUBLIC_*` is inlined at build time — restart `npm run dev` after editing.)
 5. In the dashboard, enable **EVM** and add **Email** / wallet log-in methods.
 
-## Flip the app over to Dynamic (when ready)
+## How it's wired (current state)
 
-In `frontend/app/layout.tsx`, swap the provider import:
-
-```diff
-- import { Providers } from "./providers";
-+ import { Providers } from "./providers.dynamic";
-```
-
-Then render Dynamic's UI where the wallet button lives (replace the RainbowKit
-`ConnectButton`):
-
-```tsx
-import { DynamicWidget } from "@dynamic-labs/sdk-react-core";
-// ...
-<DynamicWidget />
-```
-
-Existing wagmi hooks (`useAccount`, `useWalletClient`, the helpers in
+Dynamic is the live wallet layer. `frontend/app/layout.tsx` imports
+`Providers` from `./providers.dynamic`, and the header wallet control is
+`<DynamicWidget variant="dropdown" />` (in `app/app/_components/ConnectButton.tsx`).
+Existing wagmi hooks (`useAccount`, `useWalletClient`, the signer helpers in
 `lib/tx.ts`) keep working — `DynamicWagmiConnector` syncs the logged-in wallet
-into wagmi.
+into wagmi, and all on-chain writes are signed client-side by the connected
+wallet.
+
+**Reverting to RainbowKit (fallback):** swap the `layout.tsx` import back to
+`./providers` and restore the RainbowKit `ConnectButton`. Kept only as an
+escape hatch; Dynamic is the intended path.
+
+**Signing note:** email login creates a Dynamic **embedded (MPC) wallet**. On a
+Sandbox environment the MPC signer is rate-limited — if signatures stall, the
+write path now times out with an actionable error (see `withWalletTimeout` in
+`lib/tx.ts`); connecting an external wallet (e.g. MetaMask) bypasses MPC.
 
 ## Claude Code MCP
 
