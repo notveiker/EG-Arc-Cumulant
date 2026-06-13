@@ -132,3 +132,14 @@ alter table ppn_vaults add column if not exists price_per_token double precision
 create index if not exists idx_ppn_vaults_tranche_kind
   on ppn_vaults (tranche_kind)
   where tranche_kind is not null;
+
+-- ── Grants ───────────────────────────────────────────────────────────────────
+-- Give the backend's secret key (service_role) access to these tables. Required
+-- when the project was created with "Automatically expose new tables" OFF (which
+-- correctly keeps the public anon/publishable key out). service_role bypasses RLS,
+-- so only the backend — never the browser — can read/write these tables.
+grant usage on schema public to service_role;
+grant all privileges on all tables in schema public to service_role;
+grant all privileges on all sequences in schema public to service_role;
+alter default privileges in schema public grant all on tables to service_role;
+alter default privileges in schema public grant all on sequences to service_role;
