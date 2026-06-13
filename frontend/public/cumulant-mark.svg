@@ -1,0 +1,20 @@
+<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cumulant">
+  <defs>
+    <linearGradient id="cg" x1="24" y1="9" x2="24" y2="37" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4FE3D0"/>
+      <stop offset="1" stop-color="#6B8BFF"/>
+    </linearGradient>
+  </defs>
+  <rect width="48" height="48" rx="12" fill="#0B0E14"/>
+  <rect x="0.75" y="0.75" width="46.5" height="46.5" rx="11.25" stroke="#FFFFFF" stroke-opacity="0.10"/>
+  <!-- quantile bands forming a distribution -->
+  <g>
+    <rect x="5"     y="28" width="5" height="9"  rx="2" fill="url(#cg)" fill-opacity="0.40"/>
+    <rect x="13.25" y="18" width="5" height="19" rx="2" fill="url(#cg)" fill-opacity="0.68"/>
+    <rect x="21.5"  y="9"  width="5" height="28" rx="2" fill="url(#cg)"/>
+    <rect x="29.75" y="18" width="5" height="19" rx="2" fill="url(#cg)" fill-opacity="0.68"/>
+    <rect x="38"    y="28" width="5" height="9"  rx="2" fill="url(#cg)" fill-opacity="0.40"/>
+  </g>
+  <!-- baseline axis -->
+  <rect x="5" y="38.4" width="38" height="1.5" rx="0.75" fill="#FFFFFF" fill-opacity="0.16"/>
+</svg>

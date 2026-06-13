@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Body background + base typography are driven by the CSS variables defined in
+   app/layout.tsx (theme-reactive). This file keeps only the reusable component
+   classes the app product surfaces use. */
+:root {
+  color-scheme: dark;
+}
+
+@layer components {
+  /* Panel surface — matches the landing's .lp-term / .feat-panel aesthetic. */
+  .card {
+    @apply rounded-2xl backdrop-blur;
+    border: 0.5px solid var(--c-border);
+    background: var(--c-panel-gradient);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.28);
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold
+      transition-colors disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-primary {
+    @apply btn;
+    background: #3dd6c4;
+    color: #06231f;
+  }
+  .btn-primary:hover {
+    background: #4fe3d0;
+  }
+  .btn-ghost {
+    @apply btn;
+    border: 0.5px solid var(--c-border);
+    color: var(--c-text-primary);
+  }
+  .btn-ghost:hover {
+    border-color: var(--c-border-hover);
+    background: var(--c-card-hover);
+  }
+  .btn-yes {
+    @apply btn bg-good/15 text-good ring-1 ring-inset ring-good/30 hover:bg-good/25;
+  }
+  .btn-no {
+    @apply btn bg-bad/15 text-bad ring-1 ring-inset ring-bad/30 hover:bg-bad/25;
+  }
+  .input {
+    @apply w-full rounded-lg px-3 py-2 text-sm outline-none;
+    border: 0.5px solid var(--c-border);
+    background: var(--c-surface);
+    color: var(--c-text-primary);
+  }
+  .input:focus {
+    border-color: var(--c-border-hover);
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs;
+    border: 0.5px solid var(--c-border);
+    color: var(--c-text-muted);
+  }
+  .label {
+    @apply text-[11px] uppercase tracking-wider;
+    color: var(--c-text-muted);
+  }
+}
+
+/* Probability meter */
+.meter {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #36c28b var(--p), rgba(255, 255, 255, 0.07) var(--p));
+}

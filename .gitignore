@@ -1,0 +1,34 @@
+# Secrets
+.env
+.env.*
+!.env.example
+# .env.shared holds committed, non-secret team defaults (chain + Polymarket relay)
+# so a fresh clone runs with zero local config. NEVER put private keys here.
+!.env.shared
+*.key
+
+# Node
+node_modules/
+.next/
+dist/
+build/
+*.log
+.logs/
+*.tsbuildinfo
+
+# Backend runtime data (continuous-distribution pool + position store)
+.distribution-pools.json
+.distribution-positions.json
+
+# Foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/**/dry-run/
+# Keep only run-latest.json; the timestamped broadcast logs are local churn.
+contracts/broadcast/**/run-*.json
+!contracts/broadcast/**/run-latest.json
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
