@@ -1,0 +1,9 @@
+<svg width="200" height="100" viewBox="0 0 200 100" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cumulant" style="color:#14171A">
+  <title>Cumulant</title>
+  <desc>Cumulant stacked lockup — the diagonal triad mark above the tracked wordmark. Ink/bone via currentColor; teal accent fixed.</desc>
+  <line x1="90" y1="20" x2="110" y2="44" stroke="currentColor" stroke-width="1.6" opacity="0.25"/>
+  <circle cx="90" cy="20" r="4.5" fill="currentColor"/>
+  <circle cx="100" cy="32" r="4.5" fill="#2E5A52"/>
+  <circle cx="110" cy="44" r="4.5" fill="currentColor"/>
+  <text x="100" y="80" text-anchor="middle" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="20" font-weight="500" letter-spacing="5" fill="currentColor">CUMULANT</text>
+</svg>

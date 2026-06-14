@@ -20,26 +20,12 @@ const NAV_LEFT = [
 
 function CumulantMark() {
   return (
-    <span
-      aria-hidden
-      style={{
-        width: 24,
-        height: 24,
-        borderRadius: 8,
-        display: "inline-grid",
-        placeItems: "center",
-        background: `linear-gradient(145deg, ${C.tealLight}24, ${C.blue}10)`,
-        border: `0.5px solid ${C.tealLight}55`,
-        boxShadow: `0 0 18px ${C.tealLight}18`,
-        flexShrink: 0,
-      }}
-    >
-      <svg viewBox="0 0 24 24" width="17" height="17" fill="none">
-        <path d="M3.5 13.4C5.6 10.9 7.8 9.7 10 9.7c2.6 0 3.7 2.4 6 2.4 1.6 0 2.8-.7 4.5-2.3" stroke={C.tealLight} strokeWidth="2" strokeLinecap="round" />
-        <path d="M3.5 9.1C5.6 6.6 7.8 5.4 10 5.4c2.6 0 3.7 2.4 6 2.4 1.6 0 2.8-.7 4.5-2.3" stroke={C.teal} strokeWidth="2" strokeLinecap="round" opacity="0.95" />
-        <path d="M5 18h14" stroke="#bae6fd" strokeWidth="1.7" strokeLinecap="round" opacity="0.95" />
-      </svg>
-    </span>
+    <svg viewBox="0 0 24 24" width={24} height={24} fill="none" aria-hidden style={{ flexShrink: 0 }}>
+      <line x1="7" y1="7.5" x2="17" y2="16.5" stroke={C.textPrimary} strokeWidth="1.4" opacity="0.25" />
+      <circle cx="7" cy="7.5" r="2.5" fill={C.textPrimary} />
+      <circle cx="12" cy="12" r="2.5" fill="#2E5A52" />
+      <circle cx="17" cy="16.5" r="2.5" fill={C.textPrimary} />
+    </svg>
   );
 }
 
@@ -70,7 +56,7 @@ export function Header() {
         <div style={{ display: "flex", alignItems: "center", gap: 24, flex: 1, minWidth: 0 }}>
           <Link href="/" aria-label="Cumulant home" style={{ display: "flex", alignItems: "center", gap: 9, textDecoration: "none", flexShrink: 0 }}>
             <CumulantMark />
-            <span style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, fontFamily: FD, letterSpacing: "0.14em" }}>
+            <span style={{ fontSize: 13, fontWeight: 500, color: C.textPrimary, fontFamily: FD, letterSpacing: "0.2em" }}>
               CUMULANT
             </span>
           </Link>
