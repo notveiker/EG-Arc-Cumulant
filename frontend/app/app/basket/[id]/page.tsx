@@ -1642,13 +1642,32 @@ function BuySection({
               justifyContent: "space-between",
               fontFamily: FM,
               fontSize: 11,
-              color: C.textMuted,
+              color: C.textSecondary,
               letterSpacing: "0.02em",
+              fontWeight: 400,
+              marginBottom: 2,
             }}
           >
-            <span>Mint price</span>
-            <span>$1.00 / {unitLabel} · 1:1, no fee</span>
+            <span>Quote notional</span>
+            <span style={{ color: C.textPrimary, fontFamily: FM }}>${usdcAmount.toFixed(2)}</span>
           </div>
+          <FeeRow
+            label="Protocol fee"
+            bps={fees.protocolBps}
+            usd={(usdcAmount * fees.protocolBps) / 10_000}
+          />
+          <FeeRow
+            label="Market-maker spread"
+            bps={fees.mmSpreadBps}
+            usd={(usdcAmount * fees.mmSpreadBps) / 10_000}
+            hint="inventory + hedge"
+          />
+          <FeeRow
+            label="Slippage (ask side)"
+            bps={fees.slippageBps}
+            usd={(usdcAmount * fees.slippageBps) / 10_000}
+            hint="live CLOB walk"
+          />
           <div
             style={{
               display: "flex",
@@ -1665,7 +1684,8 @@ function BuySection({
           >
             <span>You receive</span>
             <span style={{ color: accent, fontWeight: 600 }}>
-              {tokensOut.toFixed(2)} {unitLabel}
+              {(usdcAmount * (1 - (fees.protocolBps + fees.mmSpreadBps + fees.slippageBps) / 10_000)).toFixed(2)}{" "}
+              {unitLabel}
             </span>
           </div>
           <div
@@ -1679,12 +1699,12 @@ function BuySection({
             }}
           >
             {bookStatus === "loading"
-              ? "Quoting slippage from live Polymarket books…"
+              ? "Quoting market-maker spread + slippage from live Polymarket books…"
               : fees.hasLiveBooks
-                ? `Slippage quoted live from Polymarket CLOB (${topLegCount} legs sampled).`
+                ? `Protocol fee + MM spread + live CLOB slippage (${topLegCount} legs sampled).`
                 : bookStatus === "error"
-                  ? "CLOB feed unavailable. Slippage estimated from leg volume."
-                  : "Slippage estimated from leg volume. Live book kicks in once a wallet connects."}
+                  ? "CLOB feed unavailable — slippage estimated from leg volume."
+                  : "Slippage estimated from leg volume; live book kicks in once a wallet connects."}
           </div>
         </div>
       )}
@@ -1750,9 +1770,6 @@ function SellSection({
   mmQuoteLoading: boolean;
 }) {
   const hasPosition = heldQty > 0;
-  // Pre-settlement exit = the protocol market-maker's signed bid (its own price
-  // band per product). Settled baskets fall back to the NAV-based redeem estimate.
-  const isMm = vaultState !== "finalized";
   const unrealized = hasPosition ? heldQty * (navPrice - avgCost) : 0;
   return (
     <>
@@ -1882,39 +1899,28 @@ function SellSection({
               marginBottom: 2,
             }}
           >
-            <span>{isMm ? "Position notional" : "Mid notional"}</span>
+            <span>Mid notional</span>
             <span style={{ color: C.textPrimary, fontFamily: FM }}>
               ${sellUsdcNotional.toFixed(2)}
             </span>
           </div>
-          {isMm ? (
-            <FeeRow
-              label="MM spread"
-              bps={mmQuote ? mmQuote.spread_bps : 0}
-              usd={mmQuote ? Math.max(0, sellUsdcNotional - mmQuote.payout_usdc) : 0}
-              hint="protocol market-maker bid"
-            />
-          ) : (
-            <>
-              <FeeRow
-                label="Protocol fee"
-                bps={sellFees.protocolBps}
-                usd={(sellUsdcNotional * sellFees.protocolBps) / 10_000}
-              />
-              <FeeRow
-                label="Desk & flow (incl. adverse)"
-                bps={sellFees.mmSpreadBps}
-                usd={(sellUsdcNotional * sellFees.mmSpreadBps) / 10_000}
-                hint="MM + informed-flow tilt (combined)"
-              />
-              <FeeRow
-                label="Slippage (bid side)"
-                bps={sellFees.slippageBps}
-                usd={(sellUsdcNotional * sellFees.slippageBps) / 10_000}
-                hint="live CLOB walk"
-              />
-            </>
-          )}
+          <FeeRow
+            label="Protocol fee"
+            bps={sellFees.protocolBps}
+            usd={(sellUsdcNotional * sellFees.protocolBps) / 10_000}
+          />
+          <FeeRow
+            label="Desk & flow (incl. adverse)"
+            bps={sellFees.mmSpreadBps}
+            usd={(sellUsdcNotional * sellFees.mmSpreadBps) / 10_000}
+            hint="MM + informed-flow tilt (combined)"
+          />
+          <FeeRow
+            label="Slippage (bid side)"
+            bps={sellFees.slippageBps}
+            usd={(sellUsdcNotional * sellFees.slippageBps) / 10_000}
+            hint="live CLOB walk"
+          />
           <div
             style={{
               display: "flex",
@@ -1931,13 +1937,7 @@ function SellSection({
           >
             <span>You receive</span>
             <span style={{ color: accent, fontWeight: 600 }}>
-              {isMm
-                ? mmQuote
-                  ? `$${mmQuote.payout_usdc.toFixed(2)}`
-                  : mmQuoteLoading
-                    ? "Quoting…"
-                    : "—"
-                : `$${sellPayoutUsdc.toFixed(2)}`}
+              ${(sellUsdcNotional * (1 - (sellFees.protocolBps + sellFees.mmSpreadBps + sellFees.slippageBps) / 10_000)).toFixed(2)}
             </span>
           </div>
           <div
@@ -1950,17 +1950,11 @@ function SellSection({
               marginTop: 2,
             }}
           >
-            {isMm
-              ? mmQuote
-                ? `Pre-settlement bid from the protocol market-maker (${(mmQuote.bid_per_unit * 100).toFixed(1)}¢ on the dollar). You're paid instantly from the MM reserve and the desk warehouses your position to settlement.`
-                : mmQuoteLoading
-                  ? "Fetching a live market-maker bid…"
-                  : "No market-maker bid available right now — try again in a moment."
-              : bookStatus === "loading"
-                ? "Quoting redemption impact from live Polymarket books…"
-                : sellFees.hasLiveBooks
-                  ? `Redemption slippage quoted live from ${topLegCount} CLOB legs. Desk & flow scales with size vs. basket volume.`
-                  : "CLOB feed unavailable. Slippage estimated from leg volume."}
+            {bookStatus === "loading"
+              ? "Quoting redemption impact from live Polymarket books…"
+              : sellFees.hasLiveBooks
+                ? `Protocol fee + desk/flow + live CLOB slippage (${topLegCount} legs sampled). Desk & flow scales with size vs. basket volume.`
+                : "CLOB feed unavailable. Slippage estimated from leg volume."}
           </div>
         </div>
       )}
