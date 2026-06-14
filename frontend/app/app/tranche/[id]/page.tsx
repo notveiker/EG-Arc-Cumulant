@@ -34,6 +34,7 @@ import {
 } from "../../_lib/wallet-bridge";
 import { ConnectModal } from "../../_components/ConnectModal";
 import {
+  fetchPpnPortfolio,
   fetchTrancheSellRfq,
   ppnDeposit,
   ppnRedeem,
@@ -61,6 +62,14 @@ type ResolvedBasket =
   | { kind: "seed"; basket: Bundle }
   | { kind: "missing" };
 
+/**
+ * The tranche kinds a user can actually transact. The on-chain TrancheVault
+ * only has senior + junior; mezzanine is illustrative-only on the distribution
+ * chart and is never selectable / depositable / sellable.
+ */
+type ActionableKind = Exclude<TrancheKind, "mezzanine">;
+const ACTIONABLE_KINDS: readonly ActionableKind[] = ["senior", "junior"];
+
 export default function TrancheDetail() {
   const params = useParams<{ id: string }>();
   const id = params.id;
@@ -68,11 +77,18 @@ export default function TrancheDetail() {
   const basketState = useLiveBaskets();
   // Pre-select the tab from ?tier=… when the user lands here via an AI rec.
   const queryTier = search?.get("tier");
-  const initialKind: TrancheKind =
-    queryTier === "senior" || queryTier === "mezzanine" || queryTier === "junior"
-      ? queryTier
-      : "senior";
-  const [selectedKind, setSelectedKind] = useState<TrancheKind>(initialKind);
+  // The on-chain TrancheVault models only senior/junior (a single `bool
+  // senior`); mezzanine is illustrative-only (see the 3-band chart) and has no
+  // settleable slice. So the actionable selector is senior/junior ONLY and the
+  // default kind can never be mezzanine — a `?tier=mezzanine` deep link (or any
+  // unrecognised value) lands on senior rather than throwing at deposit time.
+  const initialKind: ActionableKind =
+    queryTier === "senior" || queryTier === "junior" ? queryTier : "senior";
+  const [selectedKind, setSelectedKindRaw] = useState<ActionableKind>(initialKind);
+  // Hard guard: never let the selection become mezzanine, regardless of where
+  // the request comes from (waterfall card, buy-panel tabs, deep link).
+  const setSelectedKind = (k: TrancheKind) =>
+    setSelectedKindRaw(k === "mezzanine" ? "senior" : k);
   // Amount from ?amount=… so we can surface it in the buy card.
   const rawAmount = search?.get("amount");
   const recommendedAmount =
@@ -863,10 +879,22 @@ function WaterfallCard({
       >
         {quotes.map((q) => {
           const active = q.kind === selectedKind;
+          // Mezzanine is illustrative-only (no on-chain slice). Render its card
+          // dimmed and non-selectable so the payout-order viz still shows three
+          // bands, but the user can only act on senior/junior.
+          const illustrative = q.kind === "mezzanine";
           return (
             <button
               key={q.kind}
-              onClick={() => onSelect(q.kind)}
+              onClick={() => {
+                if (!illustrative) onSelect(q.kind);
+              }}
+              disabled={illustrative}
+              title={
+                illustrative
+                  ? "Mezzanine is illustrative only — senior/junior are tradeable on-chain."
+                  : undefined
+              }
               style={{
                 textAlign: "left",
                 background: active ? `${trancheColor(q.kind)}10` : C.surface,
@@ -875,7 +903,8 @@ function WaterfallCard({
                 }`,
                 borderRadius: 10,
                 padding: "10px 12px",
-                cursor: "pointer",
+                cursor: illustrative ? "not-allowed" : "pointer",
+                opacity: illustrative ? 0.55 : 1,
                 transition: `background 0.15s ${EASE}, border-color 0.15s ${EASE}`,
               }}
             >
@@ -890,6 +919,19 @@ function WaterfallCard({
                 }}
               >
                 {q.kind}
+                {illustrative && (
+                  <span
+                    style={{
+                      marginLeft: 6,
+                      fontSize: 8.5,
+                      letterSpacing: "0.06em",
+                      color: C.textMuted,
+                      fontWeight: 500,
+                    }}
+                  >
+                    · illustrative
+                  </span>
+                )}
               </div>
               <div
                 style={{
@@ -971,13 +1013,24 @@ function SegmentedSelectorBar({
       {quotes.map((q) => {
         const active = q.kind === selectedKind;
         const color = trancheColor(q.kind);
+        // Mezzanine band stays in the bar for the payout-order visual but is
+        // not selectable — only senior/junior settle on-chain.
+        const illustrative = q.kind === "mezzanine";
         return (
           <button
             key={q.kind}
             type="button"
             role="tab"
             aria-selected={active}
-            onClick={() => onSelect(q.kind)}
+            disabled={illustrative}
+            title={
+              illustrative
+                ? "Mezzanine is illustrative only — senior/junior are tradeable on-chain."
+                : undefined
+            }
+            onClick={() => {
+              if (!illustrative) onSelect(q.kind);
+            }}
             style={{
               height: 44,
               borderRadius: 8,
@@ -986,7 +1039,8 @@ function SegmentedSelectorBar({
                 : `${color}12`,
               border: `0.5px solid ${active ? color : `${color}33`}`,
               boxShadow: active ? `0 0 14px ${color}22, inset 0 1px 0 ${color}2e` : "none",
-              cursor: "pointer",
+              cursor: illustrative ? "not-allowed" : "pointer",
+              opacity: illustrative ? 0.5 : 1,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -1071,19 +1125,53 @@ function TrancheBuyPanel({
   const selected = quotes.find((q) => q.kind === selectedKind) ?? quotes[0];
   const accent = trancheColor(selected.kind);
 
+  // Hydrate the sellable lots for this bundle + tranche kind. The sandbox
+  // `state.tranchePositions` only carries lots opened in THIS browser session;
+  // a wallet that deposited via the real Arc flow (or in a prior session) shows
+  // nothing there. So the real source of truth is the backend portfolio: it
+  // returns one tranche row per (bundle, kind) with a `vault_id`
+  // (e.g. "tranche-0-senior") — exactly the id `fetchTrancheSellRfq` and the
+  // on-chain sell path consume. We union the on-chain ids with any sandbox ids
+  // (deduped) so an optimistically-opened lot is still sellable before the
+  // backend re-indexes.
+  const walletAddress = wallet.address;
   useEffect(() => {
     let cancelled = false;
+    // Sandbox-local lots (this session's optimistic opens).
+    const sandboxIds = state.tranchePositions
+      .filter((p) => p.bundleId === bundle.id && p.kind === selected.kind)
+      .flatMap((p) => p.allVaultIds ?? (p.vaultId ? [p.vaultId] : []));
+    if (!walletAddress) {
+      setSellLots(sandboxIds);
+      return;
+    }
     async function loadSellLots() {
-      const matching = state.tranchePositions
-        .filter((p) => p.bundleId === bundle.id && p.kind === selected.kind)
-        .flatMap((p) => p.allVaultIds ?? (p.vaultId ? [p.vaultId] : []));
-      if (!cancelled) setSellLots(matching);
+      let onchainIds: string[] = [];
+      try {
+        const portfolio = await fetchPpnPortfolio(walletAddress as string);
+        onchainIds = portfolio.vaults
+          .filter(
+            (v) =>
+              v.bundle_id === bundle.id &&
+              v.tranche_kind === selected.kind &&
+              v.status === "active" &&
+              v.principal_usdc > 0,
+          )
+          .map((v) => v.vault_id);
+      } catch {
+        // Backend unreachable / no rows: fall back to the sandbox-only view so
+        // an optimistic open stays sellable. No throw — the Sell button just
+        // reflects whatever lots we could resolve.
+      }
+      if (cancelled) return;
+      const merged = Array.from(new Set([...onchainIds, ...sandboxIds]));
+      setSellLots(merged);
     }
     void loadSellLots();
     return () => {
       cancelled = true;
     };
-  }, [bundle.id, selected.kind, txStage, state.tranchePositions]);
+  }, [bundle.id, selected.kind, txStage, state.tranchePositions, walletAddress]);
 
   // Top 10 weighted legs, regardless of tokenId availability. These
   // are used for the volume-proxy slippage calculation (which only
@@ -1278,6 +1366,13 @@ function TrancheBuyPanel({
 
   async function handlePrimary() {
     if (!canSubmit) return;
+    // Defensive: the on-chain TrancheVault has no mezzanine slice. The selector
+    // can't reach this state (senior/junior only), but never emit a mezzanine
+    // deposit even if a future change lets it through.
+    if (selected.kind === "mezzanine") {
+      setTxError("Mezzanine isn't settleable on-chain — choose senior or junior.");
+      return;
+    }
     setTxError(null);
     setTxSignature(null);
     setTxStage("preparing");
@@ -1369,6 +1464,13 @@ function TrancheBuyPanel({
 
   async function handleExecuteSell() {
     if (!appConnected || !sellRfq || sellBusy) return;
+    // Defensive: never route a mezzanine sell — it has no on-chain slice and
+    // would otherwise be mis-mapped into the junior (first-loss) bucket. The
+    // selector is senior/junior only, so this is unreachable in practice.
+    if (selected.kind === "mezzanine") {
+      setSellError("Mezzanine isn't settleable on-chain — choose senior or junior.");
+      return;
+    }
     const executable = sellRfq.filter(
       (q) => q.status === "can_execute_onchain",
     );
@@ -1555,7 +1657,9 @@ function TrancheBuyPanel({
           </div>
         </div>
 
-        {/* Tranche selector tabs */}
+        {/* Tranche selector tabs — senior/junior ONLY. Mezzanine is shown on
+            the distribution chart as an illustrative middle band but has no
+            on-chain slice, so it is not a transactable choice here. */}
         <div
           role="tablist"
           aria-label="Tranche"
@@ -1567,7 +1671,9 @@ function TrancheBuyPanel({
             border: `0.5px solid ${C.border}`,
           }}
         >
-          {quotes.map((q) => {
+          {quotes
+            .filter((q) => q.kind !== "mezzanine")
+            .map((q) => {
             const active = q.kind === selected.kind;
             return (
               <button

@@ -173,9 +173,17 @@ export function usePbuBalances(): {
   // Build one entry per initialized bundle, overlaying the wallet's holdings.
   const balances = useMemo<PbuBalanceEntry[]>(() => {
     if (!bundles) return [];
-    return bundles.map((b) => {
-      const held = holdingsByBasket.get(b.id);
-      const cat = basketCatalog.get(Number(b.id));
+    // A bundle's on-chain basketId is its CANONICAL INDEX (mod the live basket
+    // count) — the exact map the backend uses (`bundleIndex(id) % basketCount`).
+    // `/api/bundles` is returned in canonical order, so the array index IS the
+    // bundle index. The on-chain `basketHoldings`/catalog are keyed by that
+    // numeric id (0,1,2,…), NOT by the string bundle name "CMLT-HIGH-SHORT" —
+    // matching on `b.id` (the name) always missed, so every basket read 0.
+    const basketCount = basketCatalog.size;
+    return bundles.map((b, i) => {
+      const onchainId = basketCount > 0 ? i % basketCount : i;
+      const held = holdingsByBasket.get(String(onchainId));
+      const cat = basketCatalog.get(onchainId);
       // Prefer the live catalog NAV; fall back to the bundle row's NAV.
       const nav = cat ? basketNav(cat) : b.nav;
       const uiAmount = held?.ui ?? 0;

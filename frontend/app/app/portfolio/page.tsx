@@ -14,6 +14,7 @@ import { FaucetButton } from "../_components/FaucetButton";
 import { fetchPpnPortfolio, ppnRedeem, PpnError, usePpnSigner } from "../_lib/ppn-client";
 import { mergePpnVaults, mergeTranches } from "../_lib/ppn-hydrate";
 import { redeemFromBundle, DepositError } from "../_lib/deposit-client";
+import { sellToMMFromBundle, MmError } from "../_lib/mm-client";
 import { friendlyWalletError } from "../_lib/chain";
 import { useCumulant } from "@/lib/tx";
 import { useConfig } from "@/lib/hooks";
@@ -30,6 +31,16 @@ import {
 } from "../_lib/distribution-continuous-client";
 
 type View = "positions" | "personalization" | "history";
+
+/**
+ * True when a revert is the vault's settlement-state error (`AlreadySettled`) —
+ * i.e. the MM secondary-market exit isn't available because the product already
+ * settled, so the caller should fall back to a redeem/claim at maturity.
+ */
+function isSettledRevert(err: unknown): boolean {
+  const m = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return m.includes("alreadysettled") || m.includes("already settled");
+}
 
 // Catmull-Rom → cubic-bezier smoothing for a clean institutional curve.
 function smoothLine(pts: Array<[number, number]>, tension = 0.18): string {
@@ -178,6 +189,9 @@ function AccountValueChart({ value, pnl }: { value: number; pnl: number }) {
           </text>
         ))}
       </svg>
+      <div style={{ fontFamily: FM, fontSize: 9, color: C.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "right", marginTop: 2 }}>
+        Illustrative · per-account value history not yet indexed
+      </div>
     </div>
   );
 }
@@ -313,17 +327,18 @@ export default function PortfolioPage() {
     (sum, p) => sum + (Number.isFinite(p.collateral_usdc) ? p.collateral_usdc : 0),
     0,
   );
-  // On-chain basket value used in the top-line total. We value each
-  // bundle at the wallet's **cost basis** (avgCost × qty) whenever the
-  // reducer has a hydrated position for that bundleId, and only fall
-  // back to live NAV when we don't know what the user paid. Reasoning:
-  // the vault mints units at a fixed `issue_price_bps`, which is
-  // typically below live NAV, so valuing at NAV right after a deposit
-  // makes the orbit appear to grow by the issue-vs-NAV differential
-  // (user-reported bug: spend $100, see total go up $4). The NAV delta
-  // still shows up in the separate `displayPnl` line below.
+  // On-chain basket value used in the top-line total. Sourced from the
+  // AUTHORITATIVE on-chain CMLT unit balance (`pbuBalances`), NOT the browser
+  // localStorage ledger — so the value is correct on a fresh browser / new
+  // device and can't drift from what the wallet actually holds. The vault mints
+  // 1:1 at par ($1/unit, no fee), so a unit's value IS $1; valuing at par (not
+  // live NAV) also avoids the old "spend $100, total jumps +$4" issue-vs-NAV
+  // illusion. Realized P&L lands on the USDC line when the user sells/redeems.
   const onchainBasketValue = walletReady
-    ? virtualGroupsForWallet.reduce((sum, g) => sum + g.depositedUsdc, 0)
+    ? pbuBalances.balances.reduce(
+        (sum, b) => sum + (Number.isFinite(b.uiAmount) ? b.uiAmount : 0),
+        0,
+      )
     : 0;
 
   // Basket unrealized P&L is intentionally zero for active positions.
@@ -373,7 +388,15 @@ export default function PortfolioPage() {
   // tab would look empty after any browser reload even when the user has
   // on-chain deposits in the DB.
   const hydratePortfolio = React.useCallback(async () => {
-    if (!appWalletAddress) return;
+    if (!appWalletAddress) {
+      // Disconnected: clear the reducer so a previous wallet's positions
+      // can't linger (the on-chain reads zero out via walletReady gating).
+      dispatch({ type: "basket/hydrate", positions: [] });
+      dispatch({ type: "ppn/hydrate", vaults: [] });
+      dispatch({ type: "tranche/hydrate", positions: [] });
+      setDistPositions([]);
+      return;
+    }
     const wallet = appWalletAddress;
     await Promise.allSettled([
       fetchBasketPortfolio(wallet).then((positions) =>
@@ -406,6 +429,11 @@ export default function PortfolioPage() {
     };
   }, [hydratePortfolio]);
 
+  // Close a basket position. Pre-settlement (the live state for every demo
+  // basket) the protocol market-maker buys it back via `sellToMM`; a genuinely
+  // settled vault falls back to `redeem` (pro-rata USDC-pool claim). `bundleId`
+  // is the row's UUID/key (for clearing the virtual ledger); `uiBundleId` is the
+  // CMLT id the on-chain resolver maps.
   async function handleRedeem(bundleId: string, uiBundleId: string, tokens: number) {
     if (!walletReady || !appWalletAddress) return;
     setRedeemError((prev) => {
@@ -415,22 +443,33 @@ export default function PortfolioPage() {
     });
     setRedeemBusy(bundleId);
     try {
-      await redeemFromBundle({ wallet: walletSigner, bundleId, amountTokens: tokens, cumulant, config: chainConfig });
+      try {
+        await sellToMMFromBundle({
+          wallet: walletSigner,
+          cumulant,
+          bundleId: uiBundleId,
+          productType: "basket",
+          sizeUsdc: tokens > 0 ? tokens : 0,
+        });
+      } catch (err) {
+        if (!isSettledRevert(err)) throw err;
+        // Settled → claim the pro-rata USDC pool instead of an MM sell.
+        await redeemFromBundle({ wallet: walletSigner, bundleId: uiBundleId, cumulant, config: chainConfig });
+      }
       clearVirtualPositionsByUiBundleId(appWalletAddress, bundleId, uiBundleId);
-      await hydratePortfolio();
+      await Promise.all([hydratePortfolio(), pbuBalances.refresh()]);
       void usdc.refresh();
     } catch (err) {
-      // App-level DepositError carries a curated message; everything else
-      // (wallet rejection, contract custom errors like NotSettled) goes through
-      // friendlyWalletError so a settlement-only redeem reads as plain language.
-      const msg = err instanceof DepositError ? err.message : friendlyWalletError(err);
-      // "No vault positions" means nothing is on-chain behind this card — it's
-      // an orphaned optimistic/virtual position (e.g. a deposit that never
-      // landed, or an already-redeemed bundle). Clear it so the stale card
-      // disappears instead of lingering with an un-redeemable balance.
-      if (/no vault position/i.test(msg) && appWalletAddress) {
+      const msg =
+        err instanceof DepositError || err instanceof MmError
+          ? err.message
+          : friendlyWalletError(err);
+      // "No position to sell" / "no vault position" → nothing is on-chain behind
+      // this card (a deposit that never landed, or an already-closed bundle).
+      // Clear the stale virtual row so it stops lingering with no balance.
+      if (/no position|no vault position/i.test(msg)) {
         clearVirtualPositionsByUiBundleId(appWalletAddress, bundleId, uiBundleId);
-        await hydratePortfolio();
+        await Promise.all([hydratePortfolio(), pbuBalances.refresh()]);
         void usdc.refresh();
       } else {
         setRedeemError((prev) => ({ ...prev, [bundleId]: msg }));
@@ -441,14 +480,22 @@ export default function PortfolioPage() {
   }
 
   /**
-   * Redeem a PPN or tranche position. Both ride the `initialize_note` rail so
-   * a single `ppnRedeem` call handles both. When `vaultIds` has more than
-   * one id, the merged card stands for multiple on-chain notes (same
-   * bundle_id, two deposits) and we redeem each in sequence. Falls back to
-   * (bundleId, wallet) when no explicit vault ids are provided so the
-   * backend can resolve via `getActivePPNVault`.
+   * Close a PPN note or tranche position. Pre-settlement (the live state for
+   * every demo position) the protocol market-maker buys it back via `sellToMM`
+   * (productType note/tranche, with the senior/junior kind). Only a genuinely
+   * settled note/tranche falls back to `ppnRedeem` (redeem at maturity). When
+   * `vaultIds` has more than one id the merged card stands for multiple on-chain
+   * positions and the settled fallback redeems each in sequence.
    */
-  async function handleRedeemPpn(rowKey: string, opts: { vaultIds?: string[]; bundleId?: string }) {
+  async function handleRedeemPpn(
+    rowKey: string,
+    opts: {
+      vaultIds?: string[];
+      bundleId?: string;
+      productType: "tranche" | "note";
+      trancheKind?: "senior" | "junior";
+    },
+  ) {
     setRedeemError((prev) => {
       const next = { ...prev };
       delete next[rowKey];
@@ -456,26 +503,32 @@ export default function PortfolioPage() {
     });
     setRedeemBusy(rowKey);
     try {
-      const ids = opts.vaultIds?.filter(Boolean) ?? [];
-      if (ids.length > 0) {
-        // Redeem every underlying vault sequentially. Sequential keeps the
-        // wallet popup flow deterministic (one approval at a time) and lets
-        // us bail on the first failure without leaving a partial state on
-        // subsequent vaults.
-        for (const vaultId of ids) {
-          await ppnRedeem({ wallet: walletSigner, vaultId, bundleId: opts.bundleId, signNote: signRedeem });
-        }
-      } else {
-        await ppnRedeem({
+      try {
+        await sellToMMFromBundle({
           wallet: walletSigner,
-          bundleId: opts.bundleId,
-          signNote: signRedeem,
+          cumulant,
+          bundleId: opts.bundleId ?? "",
+          productType: opts.productType,
+          trancheKind: opts.trancheKind,
+          sizeUsdc: 0, // full position
         });
+      } catch (err) {
+        if (!isSettledRevert(err)) throw err;
+        // Settled → redeem the underlying note/tranche(s) at maturity.
+        const ids = opts.vaultIds?.filter(Boolean) ?? [];
+        if (ids.length > 0) {
+          for (const vaultId of ids) {
+            await ppnRedeem({ wallet: walletSigner, vaultId, bundleId: opts.bundleId, trancheKind: opts.trancheKind, signNote: signRedeem });
+          }
+        } else {
+          await ppnRedeem({ wallet: walletSigner, bundleId: opts.bundleId, trancheKind: opts.trancheKind, signNote: signRedeem });
+        }
       }
-      await hydratePortfolio();
+      await Promise.all([hydratePortfolio(), pbuBalances.refresh()]);
       void usdc.refresh();
     } catch (err) {
-      const msg = err instanceof PpnError ? err.message : friendlyWalletError(err);
+      const msg =
+        err instanceof PpnError || err instanceof MmError ? err.message : friendlyWalletError(err);
       setRedeemError((prev) => ({ ...prev, [rowKey]: msg }));
     } finally {
       setRedeemBusy(null);
@@ -531,7 +584,7 @@ export default function PortfolioPage() {
     {
       id: "tranches",
       label: "Risk Slices",
-      description: "Senior, mezzanine, and junior exposure",
+      description: "Senior and junior tranche exposure",
       value: effectiveTrancheValue + trancheAccruedYield,
       color: C.amber,
       href: "/app/tranche",
@@ -1038,7 +1091,9 @@ export default function PortfolioPage() {
                     </div>
                     <div style={{ textAlign: "right" }}>
                       <div style={{ fontSize: 13, color: C.textPrimary, fontFamily: FD }}>{fmtUsd(value, 2)}</div>
-                      <div style={{ fontSize: 11, color: pnl >= 0 ? C.green : C.red, fontFamily: FS, marginTop: 2 }}>{pnl >= 0 ? "+" : ""}{fmtUsd(pnl, 2)}</div>
+                      {pnl !== 0 && (
+                        <div style={{ fontSize: 11, color: pnl >= 0 ? C.green : C.red, fontFamily: FS, marginTop: 2 }}>{pnl >= 0 ? "+" : ""}{fmtUsd(pnl, 2)}</div>
+                      )}
                     </div>
                   </Link>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${C.border}` }}>
@@ -1051,7 +1106,7 @@ export default function PortfolioPage() {
                         handleRedeem(uuid, labelId, qty);
                       }}
                       disabled={isBusy || !walletReady}
-                      title={matured ? "Redeem at maturity" : "Redeems for your share of the vault once the basket settles at resolution"}
+                      title="Sell this basket to the protocol market-maker at its live signed bid"
                       style={{
                         padding: "7px 16px",
                         fontSize: 12,
@@ -1067,7 +1122,7 @@ export default function PortfolioPage() {
                         transition: `all 0.15s ${EASE}`,
                       }}
                     >
-                      {isBusy ? "Redeeming…" : "Redeem"}
+                      {isBusy ? "Selling…" : "Sell"}
                     </button>
                   </div>
                   {errMsg && (
@@ -1267,10 +1322,12 @@ export default function PortfolioPage() {
                               ? [p.vaultId]
                               : undefined,
                           bundleId: p.bundleId,
+                          productType: "tranche",
+                          trancheKind: p.kind === "senior" ? "senior" : "junior",
                         })
                       }
                       disabled={isBusy || !walletReady}
-                      title={matured ? "Redeem at maturity" : "Redeems your tranche shares once the tranche settles at resolution"}
+                      title="Sell this tranche slice to the protocol market-maker at its live signed bid"
                       style={{
                         padding: "7px 16px",
                         fontSize: 12,
@@ -1286,7 +1343,7 @@ export default function PortfolioPage() {
                         transition: `all 0.15s ${EASE}`,
                       }}
                     >
-                      {isBusy ? "Redeeming…" : "Redeem"}
+                      {isBusy ? "Selling…" : "Sell"}
                     </button>
                   </div>
                   {errMsg && (
@@ -1363,9 +1420,9 @@ export default function PortfolioPage() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => handleRedeemPpn(rowKey, { vaultIds: v.allVaultIds ?? [v.id], bundleId: v.bundleId })}
+                      onClick={() => handleRedeemPpn(rowKey, { vaultIds: v.allVaultIds ?? [v.id], bundleId: v.bundleId, productType: "note" })}
                       disabled={isBusy || !walletReady}
-                      title={matured ? "Redeem at maturity" : "Returns your protected principal once the note settles at resolution"}
+                      title="Sell this note to the protocol market-maker at its live signed bid"
                       style={{
                         padding: "7px 16px",
                         fontSize: 12,
@@ -1381,7 +1438,7 @@ export default function PortfolioPage() {
                         transition: `all 0.15s ${EASE}`,
                       }}
                     >
-                      {isBusy ? "Redeeming…" : "Redeem"}
+                      {isBusy ? "Selling…" : "Sell"}
                     </button>
                   </div>
                   {errMsg && (
