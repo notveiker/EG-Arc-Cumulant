@@ -53,6 +53,7 @@ import {
   type EventVerification,
 } from "../services/verify.js";
 import { quoteTranches } from "../services/tranching.js";
+import { MM_BID_BPS } from "../services/mm-quote.js";
 import { allocateNote } from "../services/ppn-allocator.js";
 import type { PPNVault } from "../types.js";
 import { bundleIdAtIndex } from "./bundles.js";
@@ -826,21 +827,11 @@ router.post("/tranche/sell/rfq", async (req: Request, res: Response) => {
     const body = (req.body ?? {}) as {
       vault_ids?: unknown;
       wallet_address?: unknown;
-      nav?: unknown;
-      sigma?: unknown;
     };
     const wallet = typeof body.wallet_address === "string" ? body.wallet_address.trim() : "";
     const ids = Array.isArray(body.vault_ids)
       ? body.vault_ids.filter((v): v is string => typeof v === "string" && !!v)
       : [];
-    // Live NAV + σ hint from the client so the indicative quote matches the buy
-    // panel (the backend has no live basket NAV here; issue price ≈ 1.0 would zero
-    // the mezzanine/junior bands). Indicative ONLY — the on-chain redeem pays the
-    // real amount, so a client hint can't affect settlement.
-    const clientNav =
-      typeof body.nav === "number" && body.nav > 0 && body.nav < 1 ? body.nav : null;
-    const clientSigma =
-      typeof body.sigma === "number" && body.sigma > 0 ? body.sigma : null;
     const quotes = await Promise.all(
       ids.map(async (id) => {
         const vault =
@@ -848,26 +839,26 @@ router.post("/tranche/sell/rfq", async (req: Request, res: Response) => {
           (await reconstructOnchainSellVault(id, wallet).catch(() => null));
         if (!vault)
           return { vault_id: id, status: "missing" as const, error: "Vault not found" };
-        const bundle = await getBundleById(vault.bundle_id).catch(() => null);
-        const legs = await getLegsByBundleId(vault.bundle_id).catch(() => []);
         const nowSec = Math.floor(Date.now() / 1000);
         const maturitySec = Math.floor(
           new Date(vault.maturity_date).getTime() / 1000,
         );
         const matured = nowSec >= maturitySec;
-        const horizonDays = Math.max(1, (maturitySec - nowSec) / 86_400);
 
+        // Price the EXACT bid the on-chain sellToMM pays (MM_BID_BPS), so the RFQ
+        // quote == what executes — no more quote-vs-execution drift. Matured lots
+        // redeem at ~par. Flat per-product bid → size-independent.
         const kind = (vault.tranche_kind ?? "senior") as TrancheKind;
-        const nav = clientNav ?? bundle?.issue_price ?? vault.price_per_token ?? 0.5;
-        const tranche = quoteTranches({
-          bundleNav: nav,
-          totalLegs: Math.max(1, legs.length || 1),
-          horizonDays,
-          ...(clientSigma ? { sigma: clientSigma } : {}),
-        }).find((t) => t.kind === kind);
-
-        const indicativePct = matured ? 100 : tranche ? tranche.pricePerToken * 100 : 95;
-        const indicativeUsdc = vault.principal_usdc * (indicativePct / 100);
+        const bidKey =
+          kind === "senior"
+            ? "tranche-senior"
+            : kind === "mezzanine"
+              ? "tranche-mezzanine"
+              : "tranche-junior";
+        const bidBps = MM_BID_BPS[bidKey] ?? 9_000;
+        const fillFraction = matured ? 1 : bidBps / 10_000;
+        const payoutUsdc = vault.principal_usdc * fillFraction;
+        const spreadBps = matured ? 0 : 10_000 - bidBps;
         return {
           vault_id: id,
           bundle_id: vault.bundle_id,
@@ -877,14 +868,17 @@ router.post("/tranche/sell/rfq", async (req: Request, res: Response) => {
           maturity_ts: maturitySec,
           seconds_remaining: Math.max(0, maturitySec - nowSec),
           entry_price_per_token: vault.price_per_token ?? null,
-          indicative_price_per_token: tranche?.pricePerToken ?? null,
-          indicative_price_pct: indicativePct,
-          indicative_usdc: indicativeUsdc,
-          mm_spread_bps: tranche?.mmSpreadBps ?? null,
-          underwriting_bps: tranche?.underwritingBps ?? null,
-          protocol_fee_bps: tranche?.protocolFeeBps ?? null,
-          expected_apy_pct: tranche?.expectedYieldPct ?? null,
-          onchain_expected_usdc: indicativeUsdc,
+          // Position size + per-unit fill so the UI can show an honest token count.
+          position_size_usdc: vault.principal_usdc,
+          indicative_price_per_token: fillFraction,
+          indicative_price_pct: fillFraction * 100,
+          indicative_usdc: payoutUsdc,
+          mm_spread_bps: spreadBps,
+          underwriting_bps: null,
+          protocol_fee_bps: null,
+          expected_apy_pct: null,
+          // sellToMM pays EXACTLY this signed amount — market bid == on-chain settle.
+          onchain_expected_usdc: payoutUsdc,
         };
       }),
     );

@@ -361,9 +361,9 @@ const BASKET_DETAIL_CSS = `
 const HOW_IT_WORKS: Array<{ num: string; title: string; body: string }> = [
   {
     num: "01",
-    title: "Quote assembly",
+    title: "Mint at par",
     body:
-      "Your quote is the basket NAV (weighted sum of each leg’s Polymarket price) plus the protocol fee, market-maker fees, and live slippage pulled from the CLOB book. Sells also pay an adverse-selection premium because the desk has to dynamically hedge redemptions in the underlying legs.",
+      "CMLT units mint 1:1 at par on Arc — $100 USDC buys exactly 100 units, with no deposit fee. The header NAV (the weighted Polymarket price of the legs) is what each unit is worth today; it converges to $1.00 if the basket resolves YES.",
   },
   {
     num: "02",
@@ -371,13 +371,13 @@ const HOW_IT_WORKS: Array<{ num: string; title: string; body: string }> = [
     body:
       IS_LEGACY
         ? `Buy signs a wallet transaction, approves USDC, and deposits into the basket vault on Arc testnet, minting CMLT units to your wallet.`
-        : "Buy signs a wallet transaction, transfers USDC into the basket vault, takes the protocol fee, and mints CMLT units back to your wallet atomically.",
+        : "Buy signs a wallet transaction, transfers USDC into the basket vault, and mints CMLT units 1:1 back to your wallet atomically — no protocol fee on the mint.",
   },
   {
     num: "03",
-    title: "Redeem at settlement",
+    title: "Exit or redeem",
     body:
-      "CMLT units redeem for their share of the vault once the basket settles at market resolution — live NAV is an estimate until then. Meanwhile, use CMLT as collateral in Risk Slices, Protected Notes, or lending to build structured positions.",
+      "Exit early any time: the protocol market-maker buys your units back at a flat 2.5% below par, paid instantly from the MM reserve. Or hold to resolution and redeem 1:1 for the vault's recovered USDC. Until then, use CMLT as collateral in Risk Slices, Protected Notes, or lending.",
   },
 ];
 
@@ -392,6 +392,14 @@ const MAX_ORDER_USDC = 250_000;
 // CLOB — see `quoteFeesBps`.
 const PROTOCOL_FEE_BPS = 25;
 const MM_SPREAD_BPS = 25;
+
+// ── On-chain pricing ground truth ────────────────────────────────────────────
+// BasketVault.deposit mints 1:1 at PAR ($1/share, no fee): pay $A → receive A
+// shares. The MM buys an early exit back at a FLAT spread below par — this MUST
+// match backend MM_BID_BPS (services/mm-quote.ts) so the displayed sell quote
+// equals what sellToMM actually pays. Size-independent (a 100 vs 1000 sell pays
+// the same %), which is why the old size-scaled slippage display was wrong.
+const MM_BID_BPS_BASKET = 9_750; // basket: 2.50% below par
 
 // Sell tab — kept SYMMETRIC with the buy stack so the quotes are consistent:
 // buy $100 → ~99.3 units ⇒ sell 100 units → ~$99.3. Protocol + desk/flow mirror
@@ -1660,23 +1668,7 @@ function BuySection({
             <span>Quote notional</span>
             <span style={{ color: C.textPrimary, fontFamily: FM }}>${usdcAmount.toFixed(2)}</span>
           </div>
-          <FeeRow
-            label="Protocol fee"
-            bps={fees.protocolBps}
-            usd={(usdcAmount * fees.protocolBps) / 10_000}
-          />
-          <FeeRow
-            label="Market-maker spread"
-            bps={fees.mmSpreadBps}
-            usd={(usdcAmount * fees.mmSpreadBps) / 10_000}
-            hint="inventory + hedge"
-          />
-          <FeeRow
-            label="Slippage (ask side)"
-            bps={fees.slippageBps}
-            usd={(usdcAmount * fees.slippageBps) / 10_000}
-            hint="live CLOB walk"
-          />
+          <FeeRow label="Mint price" bps={null} usd={null} value="$1.00 · 1:1" hint="par, no deposit fee" />
           <div
             style={{
               display: "flex",
@@ -1693,8 +1685,7 @@ function BuySection({
           >
             <span>You receive</span>
             <span style={{ color: accent, fontWeight: 600 }}>
-              {(usdcAmount * (1 - (fees.protocolBps + fees.mmSpreadBps + fees.slippageBps) / 10_000)).toFixed(2)}{" "}
-              {unitLabel}
+              {usdcAmount.toFixed(2)} {unitLabel}
             </span>
           </div>
           <div
@@ -1707,13 +1698,8 @@ function BuySection({
               marginTop: 2,
             }}
           >
-            {bookStatus === "loading"
-              ? "Quoting market-maker spread + slippage from live Polymarket books…"
-              : fees.hasLiveBooks
-                ? `Protocol fee + MM spread + live CLOB slippage (${topLegCount} legs sampled).`
-                : bookStatus === "error"
-                  ? "CLOB feed unavailable — slippage estimated from leg volume."
-                  : "Slippage estimated from leg volume; live book kicks in once a wallet connects."}
+            Minted 1:1 at par on Arc — no deposit fee. The market-maker spread
+            (~{(10_000 - MM_BID_BPS_BASKET) / 100}%) is charged only on an early exit.
           </div>
         </div>
       )}
@@ -1784,6 +1770,13 @@ function SellSection({
   // would then render the WHOLE position value as a bogus gain.
   const hasCostBasis = hasPosition && avgCost > 0;
   const unrealized = hasCostBasis ? heldQty * (navPrice - avgCost) : 0;
+  // Sell price = the REAL on-chain MM bid. When the wallet is connected we use the
+  // signed mmQuote (the exact payout sellToMM will pay); otherwise a flat-bid
+  // preview. Size-independent — a 100 vs 1000 sell pays the same %.
+  const sellSpreadBps = mmQuote ? mmQuote.spread_bps : 10_000 - MM_BID_BPS_BASKET;
+  const sellNet = mmQuote
+    ? mmQuote.payout_usdc
+    : sellUsdcNotional * (MM_BID_BPS_BASKET / 10_000);
   return (
     <>
       <div
@@ -1921,27 +1914,16 @@ function SellSection({
               marginBottom: 2,
             }}
           >
-            <span>Mid notional</span>
+            <span>Notional at par</span>
             <span style={{ color: C.textPrimary, fontFamily: FM }}>
               ${sellUsdcNotional.toFixed(2)}
             </span>
           </div>
           <FeeRow
-            label="Protocol fee"
-            bps={sellFees.protocolBps}
-            usd={(sellUsdcNotional * sellFees.protocolBps) / 10_000}
-          />
-          <FeeRow
-            label="Desk & flow (incl. adverse)"
-            bps={sellFees.mmSpreadBps}
-            usd={(sellUsdcNotional * sellFees.mmSpreadBps) / 10_000}
-            hint="MM + informed-flow tilt (combined)"
-          />
-          <FeeRow
-            label="Slippage (bid side)"
-            bps={sellFees.slippageBps}
-            usd={(sellUsdcNotional * sellFees.slippageBps) / 10_000}
-            hint="live CLOB walk"
+            label="Market-maker spread"
+            bps={sellSpreadBps}
+            usd={sellUsdcNotional - sellNet}
+            hint="flat per-product bid"
           />
           <div
             style={{
@@ -1958,9 +1940,7 @@ function SellSection({
             }}
           >
             <span>You receive</span>
-            <span style={{ color: accent, fontWeight: 600 }}>
-              ${(sellUsdcNotional * (1 - (sellFees.protocolBps + sellFees.mmSpreadBps + sellFees.slippageBps) / 10_000)).toFixed(2)}
-            </span>
+            <span style={{ color: accent, fontWeight: 600 }}>${sellNet.toFixed(2)}</span>
           </div>
           <div
             style={{
@@ -1972,11 +1952,11 @@ function SellSection({
               marginTop: 2,
             }}
           >
-            {bookStatus === "loading"
-              ? "Quoting redemption impact from live Polymarket books…"
-              : sellFees.hasLiveBooks
-                ? `Protocol fee + desk/flow + live CLOB slippage (${topLegCount} legs sampled). Desk & flow scales with size vs. basket volume.`
-                : "CLOB feed unavailable. Slippage estimated from leg volume."}
+            {mmQuoteLoading
+              ? "Fetching the market-maker's signed bid…"
+              : mmQuote
+                ? `Protocol market-maker buys back at ${(sellSpreadBps / 100).toFixed(2)}% below par — signed quote, settles instantly from the MM reserve.`
+                : `Indicative: the MM buys back at a flat ${(sellSpreadBps / 100).toFixed(2)}% below par (size-independent). Connect to lock a signed quote.`}
           </div>
         </div>
       )}
@@ -1995,13 +1975,17 @@ function FeeRow({
   bps,
   usd,
   hint,
+  value,
 }: {
   label: string;
-  bps: number;
-  usd: number;
+  bps: number | null;
+  usd: number | null;
   hint?: string;
+  /** When set, replaces the bps/usd column (e.g. "$1.00 · 1:1"). */
+  value?: string;
 }) {
-  const pctText = bps >= 100 ? `${(bps / 100).toFixed(2)}%` : `${(bps / 100).toFixed(3)}%`;
+  const pctText =
+    bps == null ? "" : bps >= 100 ? `${(bps / 100).toFixed(2)}%` : `${(bps / 100).toFixed(3)}%`;
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
       <span
@@ -2037,10 +2021,16 @@ function FeeRow({
           fontWeight: 400,
         }}
       >
-        {pctText}
-        <span style={{ color: C.textMuted, marginLeft: 6 }}>
-          ${usd.toFixed(2)}
-        </span>
+        {value != null ? (
+          <span style={{ color: C.textSecondary }}>{value}</span>
+        ) : (
+          <>
+            {pctText}
+            <span style={{ color: C.textMuted, marginLeft: 6 }}>
+              ${(usd ?? 0).toFixed(2)}
+            </span>
+          </>
+        )}
       </span>
     </div>
   );

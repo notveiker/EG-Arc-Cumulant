@@ -80,7 +80,13 @@ router.post("/quote", async (req: Request, res: Response) => {
     if (!PRODUCT_KINDS.includes(productType))
       return fail(res, 400, "product_type must be basket | tranche | note");
     const trancheKind: TrancheKind | undefined =
-      tranche_kind === "junior" ? "junior" : tranche_kind === "senior" ? "senior" : undefined;
+      tranche_kind === "junior"
+        ? "junior"
+        : tranche_kind === "mezzanine"
+          ? "mezzanine"
+          : tranche_kind === "senior"
+            ? "senior"
+            : undefined;
 
     const quote = await quoteSellToMM({
       bundleId: bundle_id,
