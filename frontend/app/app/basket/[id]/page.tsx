@@ -1543,22 +1543,19 @@ function BuySection({
             border: `0.5px solid ${C.border}`,
           }}
         >
-          <FeeRow
-            label="Protocol fee"
-            bps={fees.protocolBps}
-            usd={(usdcAmount * fees.protocolBps) / 10_000}
-          />
-          <FeeRow
-            label="Market-maker fees"
-            bps={fees.mmSpreadBps}
-            usd={(usdcAmount * fees.mmSpreadBps) / 10_000}
-          />
-          <FeeRow
-            label="Slippage"
-            bps={fees.slippageBps}
-            usd={(usdcAmount * fees.slippageBps) / 10_000}
-            hint="scales with order size"
-          />
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              fontFamily: FM,
+              fontSize: 11,
+              color: C.textMuted,
+              letterSpacing: "0.02em",
+            }}
+          >
+            <span>Mint price</span>
+            <span>$1.00 / {unitLabel} · 1:1, no fee</span>
+          </div>
           <div
             style={{
               display: "flex",

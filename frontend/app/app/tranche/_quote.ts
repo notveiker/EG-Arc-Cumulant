@@ -1203,12 +1203,21 @@ export function quoteTrancheOrder(
   const tauYearsTail = ctx?.stats
     ? Math.max(1 / 365, ctx.stats.daysLeft / 365)
     : 0.25;
-  const tailPremiumBps =
+  // The face-leverage ratio (tailExposure/deposit = capitalAtRisk/ask) explodes
+  // for a deep junior (ask ~$0.005 → a $100 clip controls ~$20k of convex face),
+  // which drove the raw premium past 300% — nonsensical, since a fee can't exceed
+  // the deposit. Cap it so the deepest slice still prices as a high-but-payable
+  // tail premium and stays tradeable at retail size, rather than blocking on an
+  // un-payable fee.
+  const TAIL_PREMIUM_CAP_BPS = 1500; // 15% max tail premium
+  const tailPremiumBps = Math.min(
+    TAIL_PREMIUM_CAP_BPS,
     (tailExposureUsdc / Math.max(1, usdcAmount)) *
-    UW_COST_OF_CAPITAL *
-    Math.sqrt(tauYearsTail) *
-    TAIL_PREMIUM_MULT[quote.kind] *
-    10_000;
+      UW_COST_OF_CAPITAL *
+      Math.sqrt(tauYearsTail) *
+      TAIL_PREMIUM_MULT[quote.kind] *
+      10_000,
+  );
 
   // Combined MM spread: base static component + size-dependent impact
   // + inventory + concentration. Capped so ridiculous orders still
@@ -1250,7 +1259,14 @@ export function quoteTrancheOrder(
   // Slippage is now the dynamic bucket: live CLOB walk + dealer risk
   // carry + underwriting/tail-risk. MM premium stays as a separate,
   // mostly-fixed line item by tranche kind.
-  const slippageBps = scaledSlippageBps + dynamicDealerRiskBps + underwritingBps;
+  // Cap the dynamic bucket so the displayed breakdown never exceeds the ~90% the
+  // fill itself clamps to. Past that the order is already capacity-blocked
+  // (totalFeeBps > the kind's block threshold), so an oversize convex clip shows
+  // a believable "expensive" fee instead of a nonsensical 300–6000%.
+  const slippageBps = Math.min(
+    8500,
+    scaledSlippageBps + dynamicDealerRiskBps + underwritingBps,
+  );
   const rawFeeFraction =
     (protocolFeeBps + mmSpreadBps + slippageBps) / 10_000;
   const clampedFeeFraction = Math.min(0.9, Math.max(0, rawFeeFraction));
