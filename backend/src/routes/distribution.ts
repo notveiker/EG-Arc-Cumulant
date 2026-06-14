@@ -47,6 +47,7 @@ import {
   seedLiquidity,
   seedAllRandom,
 } from '../services/distribution-continuous.js';
+import { resolverAuthorized, verifyWalletAuth } from '../services/auth.js';
 
 const router = Router();
 
@@ -192,9 +193,10 @@ router.get('/continuous/markets', async (_req, res) => {
   }
 });
 
-/** Seed simulated AMM liquidity into a market's pool. */
+/** Seed simulated AMM liquidity into a market's pool. ADMIN ONLY — mutates pool state. */
 router.post('/continuous/seed-liquidity', (req, res) => {
   try {
+    if (!resolverAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
     const marketId = bodyString(req, 'market_id');
     if (!marketId) throw new Error('market_id is required');
     res.json(seedLiquidity(marketId, bodyNumber(req, 'amount_usdc')));
@@ -203,9 +205,10 @@ router.post('/continuous/seed-liquidity', (req, res) => {
   }
 });
 
-/** Seed a random 5–6 figure position into every market pool at once. */
-router.post('/continuous/seed-all', (_req, res) => {
+/** Seed a random 5–6 figure position into every market pool at once. ADMIN ONLY. */
+router.post('/continuous/seed-all', (req, res) => {
   try {
+    if (!resolverAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
     res.json(seedAllRandom());
   } catch (err) {
     errorResponse(res, err);
@@ -286,6 +289,16 @@ router.post('/continuous/settle', async (req, res) => {
     const owner = bodyAddress(req);
     const positionId = bodyString(req, 'position_id');
     if (!positionId) throw new Error('position_id is required');
+    // AUTH: owner+position_id in the body is NOT authentication. The caller must
+    // prove control of `owner` with a wallet signature (fail-closed on Arc).
+    const authed = await verifyWalletAuth({
+      owner,
+      action: 'distribution-settle',
+      ref: positionId,
+      deadline: Number(req.body?.deadline) || undefined,
+      signature: bodyString(req, 'signature') || undefined,
+    });
+    if (!authed) return res.status(401).json({ error: 'unauthorized: wallet signature required' });
     res.json(await settleContinuousPosition({ owner, positionId }));
   } catch (err) {
     errorResponse(res, err);
@@ -301,6 +314,14 @@ router.post('/continuous/close', async (req, res) => {
     const owner = bodyAddress(req);
     const positionId = bodyString(req, 'position_id');
     if (!positionId) throw new Error('position_id is required');
+    const authed = await verifyWalletAuth({
+      owner,
+      action: 'distribution-close',
+      ref: positionId,
+      deadline: Number(req.body?.deadline) || undefined,
+      signature: bodyString(req, 'signature') || undefined,
+    });
+    if (!authed) return res.status(401).json({ error: 'unauthorized: wallet signature required' });
     res.json(await closeContinuousPosition({ owner, positionId }));
   } catch (err) {
     errorResponse(res, err);

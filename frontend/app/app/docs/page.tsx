@@ -601,9 +601,10 @@ function Architecture() {
           <>
             <B>Backend</B> — Express service under{" "}
             <Code>backend/</Code>. Proxies the prediction-market API,
-            aggregates USDC lending yields, exposes demo PPN routes,
-            and quotes Distribution Market curves. Upstream calls are
-            cached server-side with TTLs matched to data volatility
+            aggregates USDC lending yields, resolves and records the
+            client-signed note prepare/confirm flow, and quotes
+            Distribution Market curves. Upstream calls are cached
+            server-side with TTLs matched to data volatility
             (3 s for order books, 5 min for vault yields).
           </>,
           <>
@@ -1576,29 +1577,54 @@ curl "https://api.example.com/api/markets/orderbooks?token_ids=<id1>,<id2>"`}
       <SubHeading>PPN</SubHeading>
       <Endpoint
         method="POST"
-        path="/api/ppn/deposit"
-        description="Open a demo PPN position."
+        path="/api/ppn/allocate"
+        description="Size the vault/basket split for a deposit. Pure pricing, no chain write."
+        params={[
+          ["bundle_id",      "string", "Basket id for the basket slice."],
+          ["amount_usdc",    "number", "Total deposit."],
+          ["maturity_days",  "number", "7–365."],
+        ]}
+        responseNote="{ floor, expected, max, split: { vault_pct, basket_pct } }"
+      />
+      <Endpoint
+        method="POST"
+        path="/api/ppn/onchain/prepare"
+        description="Resolve the on-chain note (vault address + note id + 6dp amount). The wallet then signs the USDC deposit client-side."
         params={[
           ["bundle_id",      "string", "Basket id for the basket slice."],
           ["wallet_address", "string", "Depositor wallet (0x address)."],
           ["amount_usdc",    "number", "Total deposit."],
           ["maturity_days",  "number", "7–365."],
         ]}
-        responseNote="{ vault_id, floor, expected, max, split: { vault_pct, basket_pct } }"
+        responseNote="{ vault, note_id, amount_usdc6dp }"
+      />
+      <Endpoint
+        method="POST"
+        path="/api/ppn/onchain/confirm"
+        description="Record the opened note after the client-signed deposit is mined."
+        params={[
+          ["wallet_address", "string", "Depositor wallet (0x address)."],
+          ["note_id",        "string", "On-chain note id from prepare."],
+          ["tx_hash",        "string", "EVM tx hash of the deposit."],
+        ]}
+        responseNote="{ confirmed, position: PpnPosition }"
       />
       <Endpoint
         method="GET"
         path="/api/ppn/portfolio/:walletAddress"
-        description="All demo PPN positions for a wallet."
+        description="All note positions for a wallet — on-chain holdings merged with recorded metadata."
         params={[]}
         responseNote="{ positions: PpnPosition[] }"
       />
       <Endpoint
         method="POST"
-        path="/api/ppn/withdraw/:vaultId"
-        description="Redeem a matured demo PPN. Returns the summed vault + basket payout."
-        params={[]}
-        responseNote="{ payout_usdc, breakdown: { vault, basket } }"
+        path="/api/ppn/onchain/redeem/prepare"
+        description="Resolve a matured note for redemption. The wallet then signs the redeem client-side."
+        params={[
+          ["wallet_address", "string", "Position owner (0x address)."],
+          ["note_id",        "string", "On-chain note id."],
+        ]}
+        responseNote="{ vault, note_id }"
       />
       <SubHeading>Distribution Markets</SubHeading>
       <Endpoint
@@ -1687,7 +1713,7 @@ function DevRepo() {
       </P>
       <CodeBlock>
         {`app/          Next.js frontend (pages, UI state, reducers)
-backend/      Express service (market proxy, vault aggregator, PPN demo)
+backend/      Express service (market proxy, vault aggregator, note prepare/confirm)
 contracts/ Solidity contract suite (testnet deployment)`}
       </CodeBlock>
       <SubHeading>Frontend layout</SubHeading>

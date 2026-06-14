@@ -1,4 +1,6 @@
 import { Router, type Request, type Response } from "express";
+import { timingSafeEqual } from "node:crypto";
+import { config } from "../config.js";
 import {
   getLiveNAV,
   checkAndUpdateResolutions,
@@ -35,6 +37,28 @@ function safeError(e: unknown): string {
 /** A bundle id is a non-empty, reasonably bounded path token. */
 function isValidBundleId(id: unknown): id is string {
   return typeof id === "string" && id.length > 0 && id.length <= 128;
+}
+
+/**
+ * Resolver/admin auth — same scheme as backend/src/index.ts `resolverAuthorized`:
+ * checks `Authorization: Bearer <RESOLVER_API_SECRET>` with a constant-time compare.
+ * On a public chain (config.chain !== "local") an UNSET secret REJECTS (fail-closed):
+ * an unset secret there must never hand anyone the server-owned resolve role.
+ */
+function resolverAuthorized(req: Request): boolean {
+  const secret = process.env.RESOLVER_API_SECRET;
+  if (!secret) {
+    // No secret configured: allow ONLY on a local dev chain. Never fail open on
+    // a public chain (Arc).
+    return config.chain === "local";
+  }
+  const provided = req.get("authorization") ?? "";
+  const expected = `Bearer ${secret}`;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  // Constant-time comparison (equal-length guard first) so the secret can't be
+  // recovered via response-timing.
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 /**
@@ -124,6 +148,9 @@ router.get("/:bundleId/history", async (req: Request, res: Response) => {
  */
 router.post("/:bundleId/check-resolutions", async (req: Request, res: Response) => {
   try {
+    // Mutating/admin route: server-owned resolver role only (fail-closed on Arc).
+    if (!resolverAuthorized(req)) return fail(res, 401, "unauthorized");
+
     const { bundleId } = req.params;
     if (!isValidBundleId(bundleId)) return fail(res, 400, "invalid bundle id");
 
@@ -167,6 +194,11 @@ router.post("/:bundleId/check-resolutions", async (req: Request, res: Response) 
  */
 router.post("/:bundleId/simulate-resolution", async (req: Request, res: Response) => {
   try {
+    // Demo-only force-resolve: requires the resolver role AND is disabled entirely
+    // outside a local/dev chain — even WITH the secret it must never run on Arc.
+    if (!resolverAuthorized(req)) return fail(res, 401, "unauthorized");
+    if (config.chain !== "local") return fail(res, 403, "disabled outside local/dev");
+
     const { bundleId } = req.params;
     if (!isValidBundleId(bundleId)) return fail(res, 400, "invalid bundle id");
 

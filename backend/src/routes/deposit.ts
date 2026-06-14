@@ -11,7 +11,6 @@ import { supabase } from "../db/supabase.js";
 import {
   prepareDeposit,
   prepareRedeem,
-  confirmTxHash,
   readVaultState,
   resolveBundleToOnchain,
   getVaultPrice,
@@ -19,6 +18,7 @@ import {
   vaultConfigured,
   VAULT,
 } from "../services/onchain.js";
+import { confirmBasketDeposit, confirmBasketRedeem, usdcFromRaw } from "../services/verify.js";
 import { validate, depositSchema, redeemSchema } from "../utils/validation.js";
 import { bundleIdAtIndex } from "./bundles.js";
 
@@ -54,23 +54,6 @@ function statusForError(message: string): number {
   if (/insufficient/i.test(message)) return 400;
   if (/no vault positions|not found|not configured/i.test(message)) return 404;
   return 500;
-}
-
-/** The on-chain event's owner must match the wallet claiming the deposit/redeem. */
-function ownerMismatch(
-  event: Record<string, unknown> | undefined,
-  wallet: string,
-): boolean {
-  const owner = (event?.owner as string | undefined)?.toLowerCase();
-  return Boolean(owner && wallet && owner !== wallet.toLowerCase());
-}
-
-/** Decode the on-chain share label the deposit was tagged with, if surfaced. */
-function eventLabel(event: Record<string, unknown> | undefined): string | null {
-  const raw = event?.label;
-  if (Array.isArray(raw)) return Buffer.from(raw as number[]).toString("utf8");
-  if (typeof raw === "string") return raw;
-  return null;
 }
 
 function notConfigured(res: Response) {
@@ -201,20 +184,20 @@ router.post("/confirm", async (req: Request, res: Response) => {
     if (!bundle_id || !wallet_address)
       return fail(res, 400, "bundle_id and wallet_address required");
 
-    const c = await confirmTxHash(signature, wallet_address);
+    // TRUST BOUNDARY: prove the tx emitted BasketVault.Deposited for THIS wallet
+    // + the resolved basket id — not just "a tx that succeeded". Rejects a tx to
+    // the wrong contract/function and a tx signed by a different wallet.
+    const objects = await resolveBundleToOnchain(bundle_id);
+    if (objects.basketId === null) {
+      return fail(res, 400, "bundle does not map to an on-chain basket");
+    }
+    const c = await confirmBasketDeposit(signature, wallet_address, objects.basketId);
     if (!c.ok) {
-      return fail(res, 400, `Arc transaction not confirmed: ${c.status}`);
+      return fail(res, 400, `deposit not verified on-chain: ${c.status}`);
     }
-    // Owner-binding: reject a real tx hash claimed by the wrong wallet.
-    if (ownerMismatch(c.event, wallet_address)) {
-      return fail(res, 400, "Tx owner does not match wallet_address");
-    }
-    // Bundle-binding: the on-chain deposit label (when surfaced) must match the
-    // claimed bundle so a hash can't be attributed to the wrong basket.
-    const label = eventLabel(c.event);
-    if (label && label !== bundle_id) {
-      return fail(res, 400, "Tx bundle label does not match bundle_id");
-    }
+    // On-chain amounts from the verified event (authoritative; not the request body).
+    const onchainAmount = usdcFromRaw(c.args?.amount ?? 0n) || amount_usdc;
+    const onchainShares = usdcFromRaw(c.args?.sharesMinted ?? 0n) || (tokens_minted ?? 0);
     // Idempotency: a hash already recorded returns the existing row unchanged.
     const existing = await getTransactionBySignature(signature).catch(() => null);
     if (existing) {
@@ -234,16 +217,16 @@ router.post("/confirm", async (req: Request, res: Response) => {
       const position = await createPosition({
         bundle_id,
         wallet_address,
-        tokens_held: tokens_minted ?? 0,
+        tokens_held: onchainShares,
         entry_price: issue_price ?? 1,
-        deposited_usdc: amount_usdc,
+        deposited_usdc: onchainAmount,
       });
       const transaction = await createTransaction({
         bundle_id,
         wallet_address,
         type: "deposit",
-        amount_usdc,
-        tokens: tokens_minted ?? 0,
+        amount_usdc: onchainAmount,
+        tokens: onchainShares,
         fee_usdc: fee_usdc ?? 0,
         tx_signature: signature,
       });
@@ -333,13 +316,18 @@ router.post("/redeem/confirm", async (req: Request, res: Response) => {
     if (!bundle_id || !wallet_address)
       return fail(res, 400, "bundle_id and wallet_address required");
 
-    const c = await confirmTxHash(signature, wallet_address);
+    // TRUST BOUNDARY: prove the tx emitted BasketVault.Redeemed for THIS wallet +
+    // the resolved basket id; the realized payout is taken from the event, not the
+    // request body or a generic Transfer-log heuristic.
+    const objects = await resolveBundleToOnchain(bundle_id);
+    if (objects.basketId === null) {
+      return fail(res, 400, "bundle does not map to an on-chain basket");
+    }
+    const c = await confirmBasketRedeem(signature, wallet_address, objects.basketId);
     if (!c.ok) {
-      return fail(res, 400, `Arc transaction not confirmed: ${c.status}`);
+      return fail(res, 400, `redeem not verified on-chain: ${c.status}`);
     }
-    if (ownerMismatch(c.event, wallet_address)) {
-      return fail(res, 400, "Tx owner does not match wallet_address");
-    }
+    const payoutUsdc = usdcFromRaw(c.args?.payout ?? 0n);
     const existingRedeem = await getTransactionBySignature(signature).catch(
       () => null,
     );
@@ -351,7 +339,7 @@ router.post("/redeem/confirm", async (req: Request, res: Response) => {
         explorer_url: c.explorer_url,
         bundle_id,
         wallet_address,
-        payout_usdc: c.usdc_delta ?? null,
+        payout_usdc: payoutUsdc,
         transaction_id: existingRedeem.id,
       });
     }
@@ -362,7 +350,7 @@ router.post("/redeem/confirm", async (req: Request, res: Response) => {
         bundle_id,
         wallet_address,
         type: "redemption",
-        amount_usdc: c.usdc_delta ?? 0,
+        amount_usdc: payoutUsdc,
         tokens: 0,
         fee_usdc: 0,
         tx_signature: signature,
@@ -378,7 +366,7 @@ router.post("/redeem/confirm", async (req: Request, res: Response) => {
       explorer_url: c.explorer_url,
       bundle_id,
       wallet_address,
-      payout_usdc: c.usdc_delta ?? null,
+      payout_usdc: payoutUsdc,
       transaction_id: transactionId,
     });
   } catch (err) {

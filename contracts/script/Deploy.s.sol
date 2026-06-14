@@ -12,14 +12,24 @@ import {MockUSDC} from "../test/mocks/MockUSDC.sol";
 /// @notice Deploys the full Cumulant protocol (PredictionMarket + BasketVault + TrancheVault +
 ///         ProtectedNote) and, optionally, seeds demo markets and one of each structured product.
 ///
+/// Two collateral modes, selected by DEPLOY_MOCK_USDC:
+///   - mock-USDC mode (DEPLOY_MOCK_USDC=true): deploys a freely-mintable MockUSDC, mints the
+///     deployer a working balance, and (when seeding) funds the per-vault market-maker reserves.
+///     This is the Arc hackathon-demo path (`make deploy-arc-mock`) — and also the local/Anvil
+///     path — so demos aren't capped by the canonical-USDC faucet.
+///   - canonical-USDC mode (DEPLOY_MOCK_USDC unset/false): uses the real USDC at USDC_ADDRESS
+///     (0x3600…0000 on Arc testnet, `make deploy-arc`) as both collateral and gas. No minting and
+///     no MM-reserve funding — those branches are skipped because real USDC can't be minted.
+///
 /// Env:
 ///   DEPLOYER_PRIVATE_KEY   broadcaster / initial resolver / note issuer
-///   USDC_ADDRESS           collateral token (0x3600…0000 on Arc testnet)
-///   DEPLOY_MOCK_USDC       "true" → deploy a local MockUSDC instead (Anvil only)
-///   SEED_DEMO              "true" → create demo markets + basket + tranche + note
+///   USDC_ADDRESS           collateral token in canonical mode (0x3600…0000 on Arc testnet)
+///   DEPLOY_MOCK_USDC       "true" → deploy a freely-mintable MockUSDC + fund MM reserves
+///   SEED_DEMO              "true" → create demo markets + baskets + tranches (+ notes on mock)
 ///
-/// Arc:    forge script script/Deploy.s.sol --rpc-url arc_testnet --broadcast
-/// Local:  DEPLOY_MOCK_USDC=true SEED_DEMO=true forge script ... --rpc-url anvil --broadcast
+/// Arc (mock):      DEPLOY_MOCK_USDC=true SEED_DEMO=true forge script ... --rpc-url arc_testnet --broadcast
+/// Arc (canonical): forge script script/Deploy.s.sol --rpc-url arc_testnet --broadcast
+/// Local:           DEPLOY_MOCK_USDC=true SEED_DEMO=true forge script ... --rpc-url anvil --broadcast
 contract Deploy is Script {
     function run() external {
         uint256 pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
@@ -31,11 +41,14 @@ contract Deploy is Script {
 
         IERC20 usdc;
         if (deployMock) {
+            // mock-USDC mode: freely-mintable collateral so the testnet demo isn't faucet-capped.
+            // MockUSDC also exposes a public faucet()/mint() that the UI faucet and any user can call.
             MockUSDC mock = new MockUSDC();
             mock.mint(deployer, 1_000_000e6);
             usdc = IERC20(address(mock));
             console2.log("MockUSDC:", address(mock));
         } else {
+            // canonical-USDC mode: real USDC (Arc 0x3600…0000) as collateral + gas. Not mintable.
             usdc = IERC20(vm.envAddress("USDC_ADDRESS"));
         }
 

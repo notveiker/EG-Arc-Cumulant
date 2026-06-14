@@ -1,0 +1,73 @@
+---
+# Akash SDL — Cumulant backend (Express + viem) on Circle Arc testnet.
+#
+# 1. Build & push the image first (see infra/akash/DEPLOY.md):
+#      docker build -f backend/Dockerfile -t docker.io/<you>/cumulant-backend:latest .
+#      docker push docker.io/<you>/cumulant-backend:latest
+# 2. Set the `image:` below to your pushed image.
+# 3. Deploy this SDL in the Akash Console. SECRETS are placeholders here — enter the
+#    real values in the Console's env editor so they are NOT committed to git.
+#
+# After the lease is up, its public URL is the Flow webhook target:
+#      https://<lease-host>/api/flow/webhook
+version: "2.0"
+
+services:
+  backend:
+    image: docker.io/REPLACE_DOCKERHUB_USER/cumulant-backend:latest
+    expose:
+      - port: 13201        # container port (BACKEND_PORT)
+        as: 80             # served on the provider's http/https ingress
+        to:
+          - global: true
+    env:
+      # --- chain + public config (safe to commit) ---
+      - CUMULANT_CHAIN=arc
+      - BACKEND_PORT=13201
+      - ARC_TESTNET_RPC_URL=https://rpc.testnet.arc.network
+      - ARC_EXPLORER_URL=https://testnet.arcscan.app
+      # CORS allowlist — your deployed frontend origin(s), comma-separated:
+      - FRONTEND_URL=https://REPLACE_WITH_FRONTEND_ORIGIN
+      # If this provider is in a Polymarket-blocked region, point at your relay:
+      - POLYMARKET_PROXY_URL=
+
+      # --- SECRETS: set these in the Akash Console env editor, NOT in git ---
+      # Resolver/deployer signing key (the only server-owned key; consider a
+      # dedicated low-balance resolver key rather than your main deployer).
+      - DEPLOYER_PRIVATE_KEY=REPLACE_IN_CONSOLE
+      # Bearer secret gating the resolver routes (fail-closed when unset on Arc).
+      - RESOLVER_API_SECRET=REPLACE_IN_CONSOLE
+      # Dynamic Flow webhook signing secret — set AFTER you create the webhook
+      # (Dynamic dashboard → Developers → Webhooks) pointing at this lease's
+      # https URL + /api/flow/webhook, then update the deployment.
+      - DYNAMIC_WEBHOOK_SECRET=REPLACE_AFTER_WEBHOOK
+
+      # --- persistence: REQUIRED for a prod-like / multi-instance deploy ---
+      # Without these the distribution + note position stores fall back to single-instance,
+      # file-backed state, which a multi-replica or restart-prone Akash lease will lose or split.
+      # On-chain reads + Polymarket proxying still work unset; the position ledger does not scale out.
+      - SUPABASE_URL=
+      - SUPABASE_SERVICE_KEY=
+
+profiles:
+  compute:
+    backend:
+      resources:
+        cpu:
+          units: 0.5
+        memory:
+          size: 512Mi
+        storage:
+          size: 1Gi
+  placement:
+    dcloud:
+      pricing:
+        backend:
+          denom: uakt
+          amount: 100000
+
+deployment:
+  backend:
+    dcloud:
+      profile: backend
+      count: 1

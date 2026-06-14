@@ -324,25 +324,52 @@ export async function openContinuousPosition(args: {
   return { txHash, position: conf.position };
 }
 
+/** A message-signer (wagmi `signMessageAsync` / Dynamic) used to authorize an exit. */
+export type SignMessageFn = (message: string) => Promise<string>;
+
+/**
+ * Build the wallet-auth fields the backend requires for settle/close. The message
+ * MUST match backend services/auth.ts `walletAuthMessage(action, ref, deadline)` —
+ * the server recovers the signer and requires it equals `owner`. Without a signer
+ * (local dev) we send nothing and the backend allows it only on a local chain.
+ */
+async function exitAuth(
+  action: "distribution-settle" | "distribution-close",
+  positionId: string,
+  signMessage?: SignMessageFn,
+): Promise<{ deadline?: number; signature?: string }> {
+  if (!signMessage) return {};
+  const deadline = Math.floor(Date.now() / 1000) + 300;
+  const message = `Cumulant authorize\naction: ${action}\nref: ${positionId}\ndeadline: ${deadline}`;
+  const signature = await signMessage(message);
+  return { deadline, signature };
+}
+
 /** Settle a position: the protocol pays the realized net on-chain. */
-export function settleContinuousPosition(args: {
+export async function settleContinuousPosition(args: {
   owner: string;
   positionId: string;
+  signMessage?: SignMessageFn;
 }): Promise<SettleResult> {
+  const auth = await exitAuth("distribution-settle", args.positionId, args.signMessage);
   return jsonPost("/api/distribution/continuous/settle", {
     wallet_address: args.owner,
     position_id: args.positionId,
+    ...auth,
   });
 }
 
 /** Sell/close a position before settlement — unwind through the AMM (mark
  * minus maker fee + price-impact slippage), protocol pays the net on-chain. */
-export function closeContinuousPosition(args: {
+export async function closeContinuousPosition(args: {
   owner: string;
   positionId: string;
+  signMessage?: SignMessageFn;
 }): Promise<CloseResult> {
+  const auth = await exitAuth("distribution-close", args.positionId, args.signMessage);
   return jsonPost("/api/distribution/continuous/close", {
     wallet_address: args.owner,
     position_id: args.positionId,
+    ...auth,
   });
 }

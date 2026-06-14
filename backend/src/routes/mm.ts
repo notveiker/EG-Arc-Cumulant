@@ -6,7 +6,13 @@ import {
   type ProductKind,
   type TrancheKind,
 } from "../services/mm-quote.js";
-import { confirmTxHash, vaultConfigured } from "../services/onchain.js";
+import {
+  vaultConfigured,
+  resolveBundleToOnchain,
+  resolveBundleToNote,
+  resolveBundleToTranche,
+} from "../services/onchain.js";
+import { confirmSoldToMM, usdcFromRaw } from "../services/verify.js";
 import { createTransaction, getTransactionBySignature } from "../db/queries.js";
 
 /**
@@ -119,8 +125,28 @@ router.post("/confirm", async (req: Request, res: Response) => {
     if (!bundle_id || !wallet_address)
       return fail(res, 400, "bundle_id and wallet_address required");
 
-    const c = await confirmTxHash(signature, wallet_address);
-    if (!c.ok) return fail(res, 400, `Arc transaction not confirmed: ${c.status}`);
+    // TRUST BOUNDARY: prove the tx emitted a SoldToMM event with seller ==
+    // wallet_address on the vault this bundle maps to, and take the payout FROM the
+    // event (never the client-supplied payout_usdc). The bundle resolves to the same
+    // index across all three vaults, so we try each and accept the one that verifies.
+    void payout_usdc; // intentionally not trusted
+    const [basketRef, noteRef, trancheRef] = await Promise.all([
+      resolveBundleToOnchain(bundle_id),
+      resolveBundleToNote(bundle_id),
+      resolveBundleToTranche(bundle_id),
+    ]);
+    const attempts = await Promise.all([
+      basketRef.basketId !== null
+        ? confirmSoldToMM(signature, wallet_address, "basket", basketRef.basketId)
+        : Promise.resolve(null),
+      noteRef ? confirmSoldToMM(signature, wallet_address, "note", noteRef.noteId) : Promise.resolve(null),
+      trancheRef
+        ? confirmSoldToMM(signature, wallet_address, "tranche", trancheRef.trancheId)
+        : Promise.resolve(null),
+    ]);
+    const c = attempts.find((a) => a && a.ok);
+    if (!c) return fail(res, 400, "MM sell not verified on-chain (no matching SoldToMM event)");
+    const payout = usdcFromRaw(c.args?.payout ?? 0n);
 
     const existing = await getTransactionBySignature(signature).catch(() => null);
     if (existing) {
@@ -131,7 +157,7 @@ router.post("/confirm", async (req: Request, res: Response) => {
         explorer_url: c.explorer_url,
         transaction_id: existing.id,
         bundle_id,
-        payout_usdc: c.usdc_delta ?? payout_usdc ?? null,
+        payout_usdc: payout,
       });
     }
 
@@ -141,7 +167,7 @@ router.post("/confirm", async (req: Request, res: Response) => {
         bundle_id,
         wallet_address,
         type: "redemption", // an MM sell is a pre-settlement exit
-        amount_usdc: c.usdc_delta ?? payout_usdc ?? 0,
+        amount_usdc: payout,
         tokens: 0,
         fee_usdc: 0,
         tx_signature: signature,
@@ -159,7 +185,7 @@ router.post("/confirm", async (req: Request, res: Response) => {
         explorer_url: c.explorer_url,
         transaction_id: transactionId,
         bundle_id,
-        payout_usdc: c.usdc_delta ?? payout_usdc ?? null,
+        payout_usdc: payout,
       },
       201,
     );
