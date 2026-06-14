@@ -10,7 +10,6 @@ import { useSandbox, type BasketPosition } from "../_lib/demo-state";
 import { useActiveWalletAddress, useUsdcBalance, useWalletSigner } from "../_lib/wallet-bridge";
 import { fetchBasketPortfolio, usePbuBalances } from "../_lib/portfolio-client";
 import { LinkedWalletsCard } from "../_components/LinkedWalletsCard";
-import { FaucetButton } from "../_components/FaucetButton";
 import { fetchPpnPortfolio, ppnRedeem, PpnError, usePpnSigner } from "../_lib/ppn-client";
 import { mergePpnVaults, mergeTranches } from "../_lib/ppn-hydrate";
 import { redeemFromBundle, DepositError } from "../_lib/deposit-client";
@@ -736,16 +735,6 @@ export default function PortfolioPage() {
                 </button>
               ))}
             </div>
-            {/* One-shot test-USDC faucet (moved here from the header). Refresh
-                cash + on-chain unit balances after a successful mint. */}
-            {walletReady && (
-              <FaucetButton
-                onMinted={() => {
-                  void usdc.refresh();
-                  void hydratePortfolio();
-                }}
-              />
-            )}
           </div>
         </div>
 

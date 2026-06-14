@@ -15,7 +15,7 @@ export function FaucetButton({ onMinted }: { onMinted?: () => void } = {}) {
   const { primaryWallet, setShowAuthFlow } = useDynamicContext();
   const address = primaryWallet?.address;
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<{ explorerUrl: string } | null>(null);
+  const [toast, setToast] = useState<{ explorerUrl: string; gas: boolean } | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   async function mint() {
@@ -33,9 +33,12 @@ export function FaucetButton({ onMinted }: { onMinted?: () => void } = {}) {
       });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error ?? "mint failed");
-      setToast({ explorerUrl: j.data.explorerUrl as string });
+      setToast({ explorerUrl: j.data.explorerUrl as string, gas: Boolean(j.data.gasTxHash) });
       window.setTimeout(() => setToast(null), 9000);
       onMinted?.();
+      // Let any live balance/position reader refresh immediately (e.g. the header
+      // USDC pill + the portfolio cash row) instead of waiting for the next poll.
+      window.dispatchEvent(new Event("cumulant:minted"));
     } catch (e) {
       setErr((e as Error).message);
       window.setTimeout(() => setErr(null), 6000);
@@ -122,7 +125,7 @@ export function FaucetButton({ onMinted }: { onMinted?: () => void } = {}) {
               <span
                 style={{ width: 7, height: 7, borderRadius: "50%", background: C.green, boxShadow: `0 0 8px ${C.green}` }}
               />
-              <span style={{ color: C.textPrimary }}>10,000 test USDC minted</span>
+              <span style={{ color: C.textPrimary }}>{toast!.gas ? "10,000 test USDC + gas funded" : "10,000 test USDC minted"}</span>
               <a
                 href={toast!.explorerUrl}
                 target="_blank"
