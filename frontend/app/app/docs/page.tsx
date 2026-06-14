@@ -194,12 +194,13 @@ function HackathonNote() {
         }}
       >
         Cumulant is a hackathon project built for the Arc ecosystem. The
-        application is deployed to Arc testnet only. It is not
-        a financial product, a securities offering, or investment advice,
-        and no real capital is routed through any of its flows. There
-        are no plans to deploy to mainnet, issue a token, or continue
-        maintenance after the event. All displayed prices, payoffs, and
-        yields are sandbox simulations.
+        application is deployed to Arc testnet only and moves test-only USDC
+        (a freely mintable MockUSDC), never mainnet funds. It is not a
+        financial product, a securities offering, or investment advice. Deposits,
+        redemptions, and the market-maker sell are real client-signed wallet
+        transactions on Arc; market data and the distribution AMM marks are
+        modelled off live feeds. There are no plans to deploy to mainnet, issue
+        a token, or continue maintenance after the event.
       </p>
     </aside>
   );
@@ -505,16 +506,14 @@ function ProductSuite() {
       </P>
       <SubHeading>Distribution Markets</SubHeading>
       <P>
-        Distribution Markets let a user shape the whole outcome curve:
-        each live band receives a probability weight, the backend
-        normalizes the submitted curve, and compares the user&apos;s
-        target curve against the market&apos;s current CLOB-implied
-        reference curve. The position is target minus reference, and
-        required collateral is the worst negative resolution band.
-        This is the local implementation of
-        the Paradigm distribution-market idea; a production version
-        still needs on-chain accounting and wallet-signed
-        transactions.
+        Distribution Markets let a user stake a full Normal view g(x)
+        against the market&apos;s forward f(x): set a mean and spread, and
+        the position pays g(x) − f(x) at the realized outcome. The backend
+        prices the L2 distance, payoff curve, and required collateral off
+        live Polymarket CLOB odds and spot feeds. Opening escrows the
+        collateral on Arc with a client-signed USDC transfer; settle and
+        sell pay the net back on-chain. The constant-L2 AMM depth used for
+        marks is simulated.
       </P>
       <SubHeading>Cross-product navigation</SubHeading>
       <P>
@@ -534,45 +533,45 @@ function DistributionConcept() {
     <>
       <P>
         A Distribution Market trades a complete probability curve
-        instead of one YES/NO token. The local implementation uses
-        explicit buckets such as BTC terminal price bands, Arc TVL
-        ranges, or a count of Fed cuts. The frontend sends every bucket
-        weight to the backend, so the quote reflects the user&apos;s actual
-        curve rather than a hardcoded preview.
+        instead of one YES/NO token. Each market exposes a Normal forward
+        f(x) — built from live Polymarket CLOB odds or a spot price feed —
+        and the trader sets their own view g(x) by moving the mean (μ) and
+        spread (σ). The position pays g(x) − f(x) at the realized outcome.
       </P>
-      <SubHeading>Local Arc flow</SubHeading>
+      <SubHeading>Arc flow</SubHeading>
       <UL
         items={[
           <>
-            The frontend loads dynamic launch candidates from{" "}
-            <Code>/api/distribution/candidates</Code>.
+            The frontend loads live markets from{" "}
+            <Code>/api/distribution/continuous/markets</Code>, scored on
+            volume, CLOB depth, spread, and time-to-resolution.
           </>,
           <>
-            Band control changes call{" "}
-            <Code>/api/distribution/quote</Code> to normalize the curve
-            and compute the L2 quote, payout curve, collateral
-            requirement, fees, and peak target band.
+            Moving μ, σ, or collateral calls{" "}
+            <Code>/api/distribution/continuous/quote</Code>, which returns
+            the L2 quote, payoff curve, collateral requirement, fees, and
+            price impact.
           </>,
           <>
-            The backend builds each candidate from live Polymarket
-            event groups, rejects poor distribution fits, and scores
-            volume, CLOB depth, spread, time-to-resolution, and NLP
-            quality.
+            Opening is a two-step on-chain escrow:{" "}
+            <Code>open/prepare</Code> resolves the vault and amount, the
+            wallet signs a USDC transfer client-side, then{" "}
+            <Code>open/confirm</Code> records the position with the EVM tx
+            hash.
           </>,
           <>
-            Settlement calls{" "}
-            <Code>/api/distribution/launch-plan</Code> returns the
-            band market ids, token ids, initial weights, depth, and
-            readiness status for a local launch.
+            <Code>settle</Code> pays the realized net and{" "}
+            <Code>close</Code> unwinds through the AMM; both return a real
+            on-chain payout tx hash when available.
           </>,
         ]}
       />
-      <SubHeading>Production delta</SubHeading>
+      <SubHeading>What is modelled</SubHeading>
       <P>
-        Production should replace backend-signed distribution actions
-        with wallet-signed Arc EVM transactions, native
-        contract state for curve accounting, indexed position state, and
-        settlement rules tied to the chosen prediction-market source.
+        Escrow, settlement, and close payouts are real client-signed Arc
+        transactions in test USDC. The constant-L2 AMM pool depth used for
+        marks, price impact, and the close mark is simulated server-side
+        rather than held in an on-chain pool.
       </P>
     </>
   );
@@ -1604,30 +1603,66 @@ curl "https://api.example.com/api/markets/orderbooks?token_ids=<id1>,<id2>"`}
       <SubHeading>Distribution Markets</SubHeading>
       <Endpoint
         method="GET"
-        path="/api/distribution/candidates"
-        description="Live distribution-market launch candidates discovered from liquid market groups with CLOB-implied reference curves."
+        path="/api/distribution/continuous/markets"
+        description="Live continuous distribution markets — each a Normal forward f(x) built from Polymarket CLOB odds or a spot feed, with μ/σ slider ranges and pool depth."
         params={[]}
-        responseNote="{ candidates: DistributionCandidate[], funnel, fetched_at }"
+        responseNote="{ markets: ContinuousMarket[] }"
       />
       <Endpoint
         method="POST"
-        path="/api/distribution/quote"
-        description="Normalize and quote a submitted target curve against the live reference curve, returning target-reference payouts and required collateral."
+        path="/api/distribution/continuous/quote"
+        description="Quote a target view g(x) against the market forward f(x): returns the L2 distance, payoff curve, required collateral, fees, and price impact."
         params={[
-          ["candidate_id", "string", "Live distribution candidate id."],
-          ["weights", "number[]", "One probability weight per live band."],
+          ["market_id", "string", "Live continuous market id."],
+          ["target_mu", "number", "Mean of the user's view g(x)."],
+          ["target_sigma", "number", "Std dev of the user's view g(x)."],
           ["collateral_usdc", "number", "USDC collateral amount."],
         ]}
-        responseNote="{ quote: DistributionQuote }"
+        responseNote="{ quote: ContinuousQuote }"
       />
       <Endpoint
         method="POST"
-        path="/api/distribution/launch-plan"
-        description="Build a local launch plan for the selected candidate."
+        path="/api/distribution/continuous/open/prepare"
+        description="Resolve the on-chain escrow target (vault + 6dp amount) for a position open. The wallet then signs a USDC transfer client-side."
         params={[
-          ["candidate_id", "string", "Live distribution candidate id."],
+          ["wallet_address", "string", "Position owner (0x address)."],
+          ["market_id", "string", "Live continuous market id."],
+          ["target_mu", "number", "Mean of the view."],
+          ["target_sigma", "number", "Std dev of the view."],
+          ["collateral_usdc", "number", "USDC collateral amount."],
         ]}
-        responseNote="{ plan: DistributionLaunchPlan }"
+        responseNote="{ vault, usdc, amount_usdc6dp }"
+      />
+      <Endpoint
+        method="POST"
+        path="/api/distribution/continuous/open/confirm"
+        description="Record the opened position after the client-signed escrow transfer is mined."
+        params={[
+          ["wallet_address", "string", "Position owner (0x address)."],
+          ["market_id", "string", "Live continuous market id."],
+          ["tx_hash", "string", "EVM tx hash of the escrow transfer."],
+        ]}
+        responseNote="{ confirmed, position: ContinuousPosition }"
+      />
+      <Endpoint
+        method="POST"
+        path="/api/distribution/continuous/settle"
+        description="Settle a position at the realized outcome. The protocol pays the net on-chain and returns the payout tx hash when available."
+        params={[
+          ["wallet_address", "string", "Position owner (0x address)."],
+          ["position_id", "string", "Position to settle."],
+        ]}
+        responseNote="{ net_usdc, pnl_usdc, settle_tx_hash, explorer_url }"
+      />
+      <Endpoint
+        method="POST"
+        path="/api/distribution/continuous/close"
+        description="Sell/close before settlement, unwinding through the simulated AMM (mark minus fee + price impact). The protocol pays the net on-chain."
+        params={[
+          ["wallet_address", "string", "Position owner (0x address)."],
+          ["position_id", "string", "Position to close."],
+        ]}
+        responseNote="{ net_usdc, pnl_usdc, price_impact_bps, close_tx_hash, explorer_url }"
       />
       <SubHeading>Error shapes</SubHeading>
       <P>
@@ -1716,9 +1751,10 @@ function RiskSummary() {
       <P>
         The risks documented below describe the protocol&apos;s
         behaviour in a live deployment. The current hackathon
-        deployment is on Arc testnet and exposes no real capital to these
-        risks; they are documented because any structured-products
-        surface should disclose the loss paths inherent to its design.
+        deployment is on Arc testnet and moves only test USDC, so no
+        mainnet capital is exposed to these risks; they are documented
+        because any structured-products surface should disclose the loss
+        paths inherent to its design.
       </P>
       <SubHeading>NAV risk</SubHeading>
       <P>
@@ -1813,7 +1849,7 @@ function FaqAll() {
     <>
       <Faq
         q="Is real capital used in the application?"
-        a="No. The application is deployed to Arc testnet only and all flows use mock assets. No real capital is routed through the protocol."
+        a="No mainnet capital. The application runs on Arc testnet and moves a freely mintable test USDC (MockUSDC). Deposits, redemptions, the market-maker sell, and distribution settle/close are real client-signed wallet transactions on Arc, but only in test funds — there is no mainnet deployment."
       />
       <Faq
         q="Will the protocol be deployed to mainnet?"

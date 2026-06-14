@@ -353,12 +353,78 @@ async function prepareRedeemHandler(req: Request, res: Response) {
     bundle_id?: string;
     tranche_kind?: TrancheKind;
     share_id?: string;
+    vault_id?: string;
   };
   const wallet_address =
     typeof b.wallet_address === "string" ? b.wallet_address.trim() : "";
-  const bundle_id = typeof b.bundle_id === "string" ? b.bundle_id : undefined;
+  let bundle_id = typeof b.bundle_id === "string" ? b.bundle_id : undefined;
+  const vault_id = typeof b.vault_id === "string" ? b.vault_id : undefined;
   if (!wallet_address) {
     return fail(res, 400, "wallet_address is required");
+  }
+
+  // Several callers pass only a synthetic vault_id (`tranche-{i}-{kind}` or
+  // `note-{i}`) with no bundle_id / tranche_kind. Without resolving these here the
+  // handler falls through to the legacy BASKET-share path (→ "No vault positions"
+  // or a WRONG-contract redeem from BasketVault). Parse the synthetic id and
+  // resolve the correct ProtectedNote / TrancheVault target directly.
+  if (!bundle_id && vault_id) {
+    const noteMatch = /^note-(\d+)$/.exec(vault_id);
+    const trancheMatch = /^tranche-(\d+)-(senior|junior)$/.exec(vault_id);
+    if (trancheMatch) {
+      const synthBundle = bundleIdAtIndex(Number(trancheMatch[1]));
+      const kind = trancheMatch[2] as TrancheKind;
+      if (synthBundle) {
+        const ref = await resolveRedeemTranche(synthBundle, wallet_address, kind);
+        if (ref) {
+          const principal = Number(ref.shares6dp) / 1e6;
+          return ok(res, {
+            kind: "prepared",
+            bundle_id: synthBundle,
+            wallet_address,
+            principal_usdc: principal,
+            strategy_fee_usdc: 0,
+            expected_proceeds_usdc: principal,
+            redeem_fee_bps: 0,
+            tranche_kind: kind,
+            vault: ref.vault,
+            tranche_id: ref.trancheId,
+            senior: ref.senior,
+            shares: ref.shares6dp,
+            explorer_url: ref.explorerUrl,
+            position_id: `tranche-${ref.trancheId}-${kind}`,
+          });
+        }
+      }
+    } else if (noteMatch) {
+      const synthBundle = bundleIdAtIndex(Number(noteMatch[1]));
+      if (synthBundle) {
+        const ref = await resolveRedeemNote(synthBundle, wallet_address);
+        if (ref) {
+          const principal = Number(ref.principal6dp) / 1e6;
+          return ok(res, {
+            kind: "prepared",
+            bundle_id: synthBundle,
+            wallet_address,
+            principal_usdc: principal,
+            strategy_fee_usdc: 0,
+            expected_proceeds_usdc: principal,
+            redeem_fee_bps: 0,
+            tranche_kind: null,
+            vault: ref.vault,
+            note_id: ref.noteId,
+            explorer_url: ref.explorerUrl,
+            position_id: `note-${ref.noteId}`,
+          });
+        }
+      }
+    }
+    // Synthetic id recognized but no on-chain position resolved → reuse the
+    // bundle for the standard path below (it'll surface the right not-found).
+    if (noteMatch || trancheMatch) {
+      const idx = Number((noteMatch ?? trancheMatch)![1]);
+      bundle_id = bundleIdAtIndex(idx) ?? bundle_id;
+    }
   }
   // Resolve the owner's REAL on-chain position so the wallet signs the matching
   // ProtectedNote/TrancheVault redeem. (This used to resolve a BasketVault share,
