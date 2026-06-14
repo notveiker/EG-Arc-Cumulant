@@ -589,7 +589,7 @@ export default function PpnPage() {
           <section className="ppn-hero">
             <div>
               <h1>Protected Notes</h1>
-              <p>Prebuilt USDC notes with vault routing, PBU upside, and Arc testnet settlement.</p>
+              <p>Prebuilt USDC notes with vault routing, CMLT upside, and Arc testnet settlement.</p>
             </div>
           </section>
 

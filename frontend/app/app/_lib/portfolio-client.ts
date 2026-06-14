@@ -1,7 +1,7 @@
 "use client";
 /**
  * Portfolio client (Cumulant / Circle Arc, EVM) — reads on-chain basket unit
- * balances for every initialized bundle so the UI can display "you hold N PBU
+ * balances for every initialized bundle so the UI can display "you hold N CMLT
  * units of bundle X" straight from the chain rather than from sandbox state.
  *
  * On Arc, basket units are ERC-style shares tracked by the on-chain
@@ -62,13 +62,13 @@ export function listBundlesOnchain(
   return _bundleList;
 }
 
-// ---------- PBU balance hook ----------
+// ---------- CMLT balance hook ----------
 
 export interface PbuBalanceEntry {
   bundleId: string;
-  /** UI bundle name, e.g. "PBU-HIGH-SHORT". */
+  /** UI bundle name, e.g. "CMLT-HIGH-SHORT". */
   bundleName: string;
-  /** UI units of PBU held by the user. */
+  /** UI units of CMLT held by the user. */
   uiAmount: number;
   /** Raw base units (6-decimals). */
   amountRaw: bigint;
@@ -99,7 +99,7 @@ function basketNav(cat: Basket | undefined): number {
 }
 
 /**
- * On-chain PBU bundle balances for the connected wallet.
+ * On-chain CMLT bundle balances for the connected wallet.
  *
  * - Every initialized bundle from `/api/bundles` is included so the UI can
  *   render catalog rows even before the wallet holds anything; bundles the
@@ -299,7 +299,7 @@ function normalizeTier(raw: number): 90 | 70 | 50 | undefined {
  * result as `{ type: "basket/hydrate", positions }` so the in-memory state
  * reflects the latest backend truth whenever the wallet reconnects.
  *
- * - `qty` is tokens_held (PBU) — not USDC.
+ * - `qty` is tokens_held (CMLT) — not USDC.
  * - `avgCost` is entry_price (USDC per token) — the deposit-time NAV.
  * - `navHint` is the backend's current NAV for display; real pricing still
  *   comes from the live feed when the portfolio row is rendered.

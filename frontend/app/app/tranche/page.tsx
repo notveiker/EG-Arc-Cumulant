@@ -63,7 +63,7 @@ export default function TranchesPage() {
           <section className="risk-hero">
             <div>
               <h1>Risk Slices</h1>
-              <p>Senior, mezzanine, and junior exposure on PBU baskets.</p>
+              <p>Senior, mezzanine, and junior exposure on CMLT baskets.</p>
             </div>
           </section>
 

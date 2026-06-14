@@ -79,19 +79,6 @@ function readJson<T>(filePath: string): T | null {
   }
 }
 
-/**
- * Find the production-bundle filename (for a version tag), tolerant of a
- * missing/unreadable dir — the models folder is not shipped in every checkout,
- * and the dir could vanish between locateDir() and this read (TOCTOU).
- */
-function safeFindArtifactVersion(dir: string): string | undefined {
-  try {
-    return fs.readdirSync(dir).find((f) => /^cumulant-correlation-production-.*\.tar\.zst$/.test(f));
-  } catch {
-    return undefined;
-  }
-}
-
 let _artifacts: ModelArtifacts | null = null;
 
 export function loadArtifacts(): ModelArtifacts {
@@ -114,7 +101,7 @@ export function loadArtifacts(): ModelArtifacts {
   _artifacts = {
     version:
       // Derive a stable version tag from the production tarball filename if present
-      (dir && safeFindArtifactVersion(dir)) ||
+      (dir && fs.readdirSync(dir).find((f) => /^cumulant-correlation-production-.*\.tar\.zst$/.test(f))) ||
       'cumulant-corr-unknown',
     classifier_precision: Number(model?.classification_precision ?? summary?.classifier_precision ?? 0),
     classifier_recall: Number(model?.classification_recall ?? 0),

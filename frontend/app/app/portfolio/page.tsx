@@ -10,6 +10,7 @@ import { useSandbox, type BasketPosition } from "../_lib/demo-state";
 import { useActiveWalletAddress, useUsdcBalance, useWalletSigner } from "../_lib/wallet-bridge";
 import { fetchBasketPortfolio, usePbuBalances } from "../_lib/portfolio-client";
 import { LinkedWalletsCard } from "../_components/LinkedWalletsCard";
+import { FaucetButton } from "../_components/FaucetButton";
 import { fetchPpnPortfolio, ppnRedeem, PpnError, usePpnSigner } from "../_lib/ppn-client";
 import { mergePpnVaults, mergeTranches } from "../_lib/ppn-hydrate";
 import { redeemFromBundle, DepositError } from "../_lib/deposit-client";
@@ -192,14 +193,14 @@ export default function PortfolioPage() {
   const [redeemBusy, setRedeemBusy] = useState<string | null>(null);
   const [redeemError, setRedeemError] = useState<Record<string, string>>({});
   const basketState = useLiveBaskets();
-  // Authoritative on-chain PBU unit balances per bundle. Polls the active
+  // Authoritative on-chain CMLT unit balances per bundle. Polls the active
   // chain every 15s and zeroes out to empty entries when the wallet is
   // disconnected. This is the ONLY source we trust for "how many basket
   // tokens does this wallet actually own" — any cancelled deposit never
-  // mints PBU so it contributes $0 here regardless of what optimistic UI
+  // mints CMLT so it contributes $0 here regardless of what optimistic UI
   // state or stale Supabase rows claim.
   const pbuBalances = usePbuBalances();
-  // Authoritative on-chain PBU qty per bundle UUID. Computed once here and
+  // Authoritative on-chain CMLT qty per bundle UUID. Computed once here and
   // reused by every gating path below (tranches, PPNs, virtual groups,
   // residuals). Bundles without a positive balance are absent from the map.
   // Hoisted out of the render block so the headline / donut / breakdown
@@ -246,17 +247,17 @@ export default function PortfolioPage() {
   }, []);
 
   // Position buckets are independent on the three product rails:
-  //   - Baskets are the user's PBU unit balance × live NAV. PBU only
+  //   - Baskets are the user's CMLT unit balance × live NAV. CMLT only
   //     lands in the user's wallet via a basket deposit (PPN / tranche
   //     deposits swap USDC into a product-owned Arc position and hand back
-  //     a product receipt, so on-chain PBU presence IS the
+  //     a product receipt, so on-chain CMLT presence IS the
   //     source of truth for basket exposure.
   //   - Tranche / PPN rows come from the backend, which we've taught
   //     to filter by `onchain_tx_signature IS NOT NULL` — i.e. only
   //     rows where the user's note-initialize tx actually landed.
   //     Cancelled-in-wallet deposits therefore never reach the reducer,
   //     so we can trust reducer state directly here.
-  // There is no double-counting between the buckets: a user's PBU
+  // There is no double-counting between the buckets: a user's CMLT
   // balance and a note vault's principal are different assets.
   const effectiveTranches = walletReady ? state.tranchePositions : [];
   const effectivePpnVaults = walletReady ? state.ppnVaults : [];
@@ -328,7 +329,7 @@ export default function PortfolioPage() {
   // Basket unrealized P&L is intentionally zero for active positions.
   //
   // The old computation (qty × (nav - avgCost)) is a NAV-based fantasy:
-  //   - the Arc product issues PBU at a fixed `issue_price_bps` (set at
+  //   - the Arc product issues CMLT at a fixed `issue_price_bps` (set at
   //     bundle init), so depositing at a moment when live NAV > issue
   //     price immediately produces a "gain" that didn't exist,
   //   - early exit via `exit_active` pays the user's pro-rata share of
@@ -343,7 +344,7 @@ export default function PortfolioPage() {
   // yield accrual below, which are real Arc product accruals.
   const onchainBasketPnl = 0;
 
-  // Top-line value: USDC + basket value (PBU × NAV) + tranche / PPN
+  // Top-line value: USDC + basket value (CMLT × NAV) + tranche / PPN
   // principal + accrued yield + lend/loan. Tranche/PPN rows come from
   // the reducer, which is hydrated from the backend; the backend only
   // returns rows with `onchain_tx_signature IS NOT NULL`, so cancelled
@@ -665,21 +666,33 @@ export default function PortfolioPage() {
               </div>
             )}
           </div>
-          <div className="portfolio-tabs">
-            {([
-              { id: "positions", label: "Overview" },
-              { id: "personalization", label: "Allocation" },
-              { id: "history", label: "History" },
-            ] as const).map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setView(t.id)}
-                className={`portfolio-tab${view === t.id ? " active" : ""}`}
-              >
-                {t.label}
-              </button>
-            ))}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 10 }}>
+            <div className="portfolio-tabs">
+              {([
+                { id: "positions", label: "Overview" },
+                { id: "personalization", label: "Allocation" },
+                { id: "history", label: "History" },
+              ] as const).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setView(t.id)}
+                  className={`portfolio-tab${view === t.id ? " active" : ""}`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            {/* One-shot test-USDC faucet (moved here from the header). Refresh
+                cash + on-chain unit balances after a successful mint. */}
+            {walletReady && (
+              <FaucetButton
+                onMinted={() => {
+                  void usdc.refresh();
+                  void hydratePortfolio();
+                }}
+              />
+            )}
           </div>
         </div>
 
@@ -815,13 +828,13 @@ export default function PortfolioPage() {
           const rows: { value: number; el: React.ReactNode; key: string }[] = [];
 
           // Pull every virtual-position group the user has deposited. Each
-          // group corresponds to a distinct synthetic id (e.g. PBU-HIGH-
+          // group corresponds to a distinct synthetic id (e.g. CMLT-HIGH-
           // SHORT) and becomes its own card, even when multiple synthetic
           // ids share a single on-chain UUID.
           const virtualGroups: GroupedVirtualPosition[] = virtualGroupsForWallet;
           // `onchainTokensByUuid` is hoisted to component scope (shared with
           // the headline/donut totals). Basket cards gate on positive
-          // on-chain PBU balance so stale reducer rows can't
+          // on-chain CMLT balance so stale reducer rows can't
           // produce ghost cards that don't match the wallet.
           const virtualTokensByUuid = virtualGroups.reduce<Record<string, number>>(
             (acc, g) => {
@@ -833,7 +846,7 @@ export default function PortfolioPage() {
           // Map uuid → a representative uiBundleId from any virtual group.
           // When a residual position exists for a UUID the user has ALSO
           // deposited into via a synthetic id, borrowing that id gives us
-          // the user's intent (they picked PBU-MID-SHORT, so the residual
+          // the user's intent (they picked CMLT-MID-SHORT, so the residual
           // card should label + route the same way). Picking the largest
           // group by token count stays stable under duplicate ids.
           const uiBundleIdByUuid = virtualGroups.reduce<Record<string, { id: string; tokens: number }>>(
@@ -847,11 +860,11 @@ export default function PortfolioPage() {
             {},
           );
 
-          // Derive a frontend PBU- label for a residual on-chain position
+          // Derive a frontend CMLT- label for a residual on-chain position
           // whose bundleId is a backend UUID (so resolveBasket misses).
           // Preference order:
           //   1. Use p.displayName if the backend already stored a
-          //      PBU-TIER-WINDOW name (new seed) — that's the authoritative
+          //      CMLT-TIER-WINDOW name (new seed) — that's the authoritative
           //      basket identity and it routes directly to /app/basket/[id].
           //   2. Borrow the user's own uiBundleId if they have any virtual
           //      group for this UUID — that's their actual intent.
@@ -859,7 +872,7 @@ export default function PortfolioPage() {
           //      backend's maturityAt. Keeps (tier, window) semantics even
           //      for pre-ledger deposits.
           //   4. Match any seed bundle with the same tier (window unknown,
-          //      but at least the tier + PBU- format is correct).
+          //      but at least the tier + CMLT- format is correct).
           // Returns null when even the tier is unknown — caller falls back
           // to whatever p.displayName was.
           const deriveResidualLabel = (p: BasketPosition): {
@@ -867,7 +880,7 @@ export default function PortfolioPage() {
             tier: 90 | 70 | 50;
             nav: number;
           } | null => {
-            if (p.displayName && /^PBU-(HIGH|MID|LOW)-(SHORT|MED|LONG)$/.test(p.displayName)) {
+            if (p.displayName && /^CMLT-(HIGH|MID|LOW)-(SHORT|MED|LONG)$/.test(p.displayName)) {
               const live = basketState.status === "ok"
                 ? basketState.baskets.find((b) => b.id === p.displayName)
                 : null;
@@ -910,7 +923,7 @@ export default function PortfolioPage() {
                 return { labelId: pick.id, tier: pick.tier, nav: pick.nav };
               }
             }
-            const seed = bundleById(`PBU-${tierGuess === 90 ? "HIGH" : tierGuess === 70 ? "MID" : "LOW"}-SHORT`);
+            const seed = bundleById(`CMLT-${tierGuess === 90 ? "HIGH" : tierGuess === 70 ? "MID" : "LOW"}-SHORT`);
             if (seed) {
               return { labelId: seed.id, tier: seed.tier, nav: p.navHint ?? seed.nav };
             }
@@ -1069,7 +1082,7 @@ export default function PortfolioPage() {
 
           // Render one card per virtual group, using the NAV at deposit
           // time as the cost basis so PnL starts at zero. Crucially, we
-          // cap qty at the wallet's on-chain PBU balance: if the user
+          // cap qty at the wallet's on-chain CMLT balance: if the user
           // redeemed / burned / transferred the tokens the virtual ledger
           // can't catch up on its own, so the chain is the final word.
           virtualGroups.forEach((g) => {
@@ -1147,8 +1160,8 @@ export default function PortfolioPage() {
             const residual = onchainForUuid - coveredByVirtual;
             if (residual <= 0.001) return;
             // First try the catalog (works when bundleId is already a
-            // PBU- id), then fall through to deriveResidualLabel which
-            // maps a backend UUID → the best-guess PBU-TIER-WINDOW id.
+            // CMLT- id), then fall through to deriveResidualLabel which
+            // maps a backend UUID → the best-guess CMLT-TIER-WINDOW id.
             // Using p.displayName can leak an old bundle id into the
             // UI and breaks the basket-detail route.
             const catalogMatch = resolveBasket(p.bundleId);
@@ -1188,9 +1201,9 @@ export default function PortfolioPage() {
 
 
           // `effectiveTranches` is the reducer's tranchePositions filtered to
-          // rows backed by on-chain PBU. Rows from cancelled
+          // rows backed by on-chain CMLT. Rows from cancelled
           // transactions (backend creates the row before the wallet signs)
-          // never appear here because the wallet holds no matching PBU.
+          // never appear here because the wallet holds no matching CMLT.
           effectiveTranches.forEach((p, i) => {
             const principal = p.qty * p.avgCost;
             // Per-card accrued yield — same formula as trancheAccruedYield, so
