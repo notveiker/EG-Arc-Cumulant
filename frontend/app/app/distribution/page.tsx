@@ -6,7 +6,6 @@ import { C, FD, FM, FS, EASE } from "../_lib/tokens";
 import { monotonePath } from "../_lib/curve";
 import { arcscanTxUrl, friendlyWalletError } from "../_lib/chain";
 import { ConnectModal } from "../_components/ConnectModal";
-import { FaucetButton } from "../_components/FaucetButton";
 import { useWalletSigner, useActiveWalletAddress, useUsdcBalance } from "../_lib/wallet-bridge";
 import {
   fetchContinuousMarkets,
@@ -605,14 +604,12 @@ export default function DistributionPage() {
               )}
 
               {/* Opening signs a real USDC.transfer on Arc — a fresh wallet has no
-                  test USDC, so the tx would revert. Surface the (gas-free, deployer-
-                  signed) faucet inline when the balance can't cover the collateral. */}
+                  test USDC, so the tx would revert. Point users at the global header
+                  faucet (mints test USDC + tops up gas) when they can't cover it. */}
               {wallet.connected && quote && !flat && usdc.uiAmount < quote.collateral_required_usdc && (
-                <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                  <span style={{ fontFamily: FM, fontSize: 11.5, color: C.amber }}>
-                    Need {usd(quote.collateral_required_usdc)} test USDC to open — you have {usd(usdc.uiAmount)}.
-                  </span>
-                  <FaucetButton onMinted={() => usdc.refresh()} />
+                <div style={{ marginTop: 12, fontFamily: FM, fontSize: 11.5, color: C.amber }}>
+                  Need {usd(quote.collateral_required_usdc)} test USDC to open — you have {usd(usdc.uiAmount)}.
+                  Use “Mint 10k USDC” in the header to fund your wallet.
                 </div>
               )}
 
