@@ -34,7 +34,6 @@ import {
 } from "../db/queries.js";
 import {
   prepareRedeem,
-  confirmTxHash,
   readVaultState,
   listShares,
   vaultConfigured,
@@ -45,6 +44,13 @@ import {
   listOnchainPpnHoldings,
   VAULT,
 } from "../services/onchain.js";
+import {
+  confirmNoteDeposit,
+  confirmTrancheDeposit,
+  confirmNoteRedeem,
+  confirmTrancheRedeem,
+  usdcFromRaw,
+} from "../services/verify.js";
 import { quoteTranches } from "../services/tranching.js";
 import { allocateNote } from "../services/ppn-allocator.js";
 import type { PPNVault } from "../types.js";
@@ -66,6 +72,29 @@ function safeError(e: unknown): string {
   return /https?:\/\/|viem@|Request Arguments/i.test(first)
     ? "internal error"
     : first;
+}
+
+/**
+ * Resolve a confirm's synthetic id to the on-chain product it must be verified
+ * against. `note-{i}` → ProtectedNote note i; `tranche-{i}-{kind}` → TrancheVault
+ * tranche i. Falls back to the bundle id (note rail) when no vault_id is given.
+ */
+type PpnTarget = { product: "note" | "tranche"; id: number };
+async function resolvePpnTarget(
+  vault_id?: string,
+  bundle_id?: string,
+): Promise<PpnTarget | null> {
+  if (vault_id) {
+    const n = /^note-(\d+)$/.exec(vault_id);
+    if (n) return { product: "note", id: Number(n[1]) };
+    const t = /^tranche-(\d+)-(?:senior|junior|mezzanine)$/.exec(vault_id);
+    if (t) return { product: "tranche", id: Number(t[1]) };
+  }
+  if (bundle_id) {
+    const ref = await resolveBundleToNote(bundle_id);
+    if (ref) return { product: "note", id: ref.noteId };
+  }
+  return null;
 }
 
 /** Map a sanitized error message to an HTTP status (ported from Cumulant). */
@@ -285,8 +314,20 @@ router.post("/onchain/confirm", async (req: Request, res: Response) => {
       return fail(res, 400, "tx_hash must be a 0x-prefixed 66-char EVM hash");
     }
 
-    const c = await confirmTxHash(signature, wallet_address);
-    if (!c.ok) return fail(res, 400, `Arc transaction not confirmed: ${c.status}`);
+    if (!wallet_address) return fail(res, 400, "wallet_address required");
+    // TRUST BOUNDARY: prove the tx emitted a Deposited event on the right
+    // ProtectedNote / TrancheVault, for THIS wallet + note/tranche id — not just
+    // "some tx that succeeded". Rejects a tx to the wrong contract/function and a
+    // tx signed by a different wallet.
+    const target = await resolvePpnTarget(vault_id, bundle_id);
+    if (!target) {
+      return fail(res, 400, "could not resolve the on-chain note/tranche for this confirm");
+    }
+    const v =
+      target.product === "note"
+        ? await confirmNoteDeposit(signature, wallet_address, target.id)
+        : await confirmTrancheDeposit(signature, wallet_address, target.id);
+    if (!v.ok) return fail(res, 400, `deposit not verified on-chain: ${v.status}`);
 
     try {
       if (vault_id)
@@ -306,8 +347,12 @@ router.post("/onchain/confirm", async (req: Request, res: Response) => {
         if (!already) {
           const vault = vault_id ? await getPPNVaultById(vault_id) : null;
           const ledgerBundle = bundle_id ?? vault?.bundle_id;
+          // Use the ON-CHAIN amount from the verified Deposited event (note
+          // `principal` / tranche `amount`), not the client-supplied amount_usdc.
           const principal =
-            Number(b.amount_usdc) || Number(vault?.principal_usdc) || 0;
+            usdcFromRaw(v.args?.principal ?? v.args?.amount ?? 0n) ||
+            Number(vault?.principal_usdc) ||
+            0;
           if (ledgerBundle && principal > 0) {
             await createTransaction({
               bundle_id: ledgerBundle,
@@ -329,8 +374,8 @@ router.post("/onchain/confirm", async (req: Request, res: Response) => {
       confirmed: true,
       vault_id: vault_id ?? null,
       tx_hash: signature,
-      explorer_url: c.explorer_url,
-      block_number: c.block_number ?? null,
+      explorer_url: v.explorer_url,
+      block_number: null,
     });
   } catch (err) {
     console.error("POST /api/ppn/onchain/confirm error:", err);
@@ -553,8 +598,23 @@ async function confirmCloseHandler(req: Request, res: Response, status: string) 
     return fail(res, 400, "tx_hash must be a 0x-prefixed 66-char EVM hash");
   }
 
-  const c = await confirmTxHash(signature, wallet_address);
-  if (!c.ok) return fail(res, 400, `Arc transaction not confirmed: ${c.status}`);
+  if (!wallet_address) return fail(res, 400, "wallet_address required");
+  // TRUST BOUNDARY: prove the tx emitted a Redeemed event on the right
+  // ProtectedNote / TrancheVault for THIS wallet + id before recording the exit.
+  const target = await resolvePpnTarget(vault_id, bundle_id);
+  if (!target) {
+    return fail(res, 400, "could not resolve the on-chain note/tranche for this confirm");
+  }
+  const v =
+    target.product === "note"
+      ? await confirmNoteRedeem(signature, wallet_address, target.id)
+      : await confirmTrancheRedeem(signature, wallet_address, target.id);
+  if (!v.ok) return fail(res, 400, `exit not verified on-chain: ${v.status}`);
+  // Realized payout from the verified event (note: principal+coupon; tranche: payout).
+  const payout =
+    target.product === "note"
+      ? usdcFromRaw(v.args?.principal ?? 0n) + usdcFromRaw(v.args?.coupon ?? 0n)
+      : usdcFromRaw(v.args?.payout ?? 0n);
 
   // The redeem's share id is the on-chain basket reference, not the Supabase row
   // id, so resolve the active note/tranche vault by (wallet, bundle) to mark it
@@ -587,7 +647,7 @@ async function confirmCloseHandler(req: Request, res: Response, status: string) 
             bundle_id: ledgerBundle,
             wallet_address,
             type: "redemption",
-            amount_usdc: c.usdc_delta ?? 0,
+            amount_usdc: payout,
             tokens: 0,
             fee_usdc: 0,
             tx_signature: signature,
@@ -603,9 +663,9 @@ async function confirmCloseHandler(req: Request, res: Response, status: string) 
     confirmed: true,
     vault_id: vault_id ?? null,
     tx_hash: signature,
-    explorer_url: c.explorer_url,
-    principal_returned: c.usdc_delta ?? null,
-    block_number: c.block_number ?? null,
+    explorer_url: v.explorer_url,
+    principal_returned: payout,
+    block_number: null,
     status,
   });
 }

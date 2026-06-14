@@ -10,9 +10,16 @@ live quoting surface that lets you trade a full probability curve against the ma
 CLOB-implied curve.
 
 Everything runs on the **EVM** with **USDC as both collateral and gas** (Circle Arc's model).
-There is no mock token in production and no custodial backend signer: **every trade is signed by
-the user's own wallet.** The full suite runs locally end-to-end on Anvil and deploys to Arc with
-one command.
+**Every user product trade — buy, deposit, redeem, sell — is signed by the user's own wallet and is
+non-custodial.** The full suite runs locally end-to-end on Anvil and deploys to Arc with one command.
+
+> **Hackathon / testnet rails.** The Arc deployment is a testnet demo, not a production system.
+> Collateral is a **freely-mintable MockUSDC** (`0xFaA6d484F86E696EE59fF1A71f52a48e8a978306`, open
+> `faucet`/`mint`), *not* canonical Arc USDC, so demos aren't capped by the faucet. A deployer-owned
+> key funds and signs a set of **server-side demo rails** — the test-USDC faucet, resolver
+> settlement (resolve/void), market-maker quote signing for pre-settlement sells, and the
+> distribution settle/close payout. These are operational conveniences for the demo; user funds are
+> never custodied and user trades are always wallet-signed. Don't read this as production-ready.
 
 ---
 
@@ -36,7 +43,9 @@ one command.
   findings fixed — see [`SECURITY.md`](SECURITY.md). No theft or insolvency was found; the fixes
   address liveness (unresolvable legs can't freeze funds) and griefing (curated product creation).
 - **Backend** (Express + viem) reads every market / basket / tranche / note / portfolio from
-  chain as JSON. The **only** thing it signs is the server-owned resolver role.
+  chain as JSON. It never custodies user funds; user trades are wallet-signed. What it *does* sign,
+  from the deployer key, are the testnet demo rails: the test-USDC faucet, resolver settlement, the
+  market-maker quote for pre-settlement sells, and the distribution settle/close payout.
 - **Frontend** (Next.js App Router + wagmi + Dynamic) — a route per product
   (`/app/portfolio`, `/app/basket` + `/basket/[id]`, `/app/tranche` + `/tranche/[id]`, `/app/ppn`,
   `/app/distribution`, `/app/docs`). Connect a wallet and sign your own
@@ -112,8 +121,9 @@ curl localhost:13201/api/health       # chain + contract status (markets/baskets
 ## Architecture
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md). In short: the Solidity contracts are the single source
-of truth; the backend is a thin typed read layer (plus the resolver role); the frontend signs
-every user action with the connected wallet.
+of truth; the backend is a thin typed read layer plus the deployer-key demo rails (faucet, resolver
+settlement, MM quote signing, distribution payout); the frontend signs every user trade with the
+connected wallet.
 
 ## Roadmap
 

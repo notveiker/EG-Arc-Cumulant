@@ -20,7 +20,7 @@ import path from 'node:path';
 import { getAddress, parseUnits } from 'viem';
 import { publicClient, resolverAddress, resolverWallet } from '../chain.js';
 import { config, explorerTx } from '../config.js';
-import { confirmTxHash } from './onchain.js';
+import { confirmUsdcEscrow } from './verify.js';
 import { createTransaction, getTransactionBySignature } from '../db/queries.js';
 import { discoverDistributionCandidates, type DistributionCandidate } from './distribution.js';
 
@@ -867,18 +867,21 @@ export async function confirmContinuousOpen(args: {
   // Idempotency: a tx hash backs exactly one position — never overwrite an existing
   // one (re-posting the same hash with different targets must not mint a second).
   const existing = store.get(args.tx_hash);
-  if (existing) return existing;
-  // Owner-binding: verify the escrow tx landed AND was signed by the claiming
-  // wallet, not just that *some* tx with this hash succeeded.
-  const conf = await confirmTxHash(args.tx_hash, args.owner);
-  if (!conf.ok) {
-    throw new Error('Open transaction not found or did not succeed on-chain.');
-  }
-  const sender = (conf.event?.owner as string | undefined)?.toLowerCase();
-  if (sender && sender !== args.owner.toLowerCase()) {
-    throw new Error('Open transaction was not signed by the claiming wallet.');
-  }
+  if (existing) return existing; // one tx hash → exactly one position (replay-safe)
   const quote = quoteContinuous(args);
+  // TRUST BOUNDARY: prove the tx is an ERC-20 USDC Transfer FROM the claiming wallet
+  // TO the treasury for AT LEAST the quoted collateral — not just "some tx that
+  // succeeded by this sender". Rejects a wrong-token/wrong-recipient/short-amount tx
+  // and a tx the claimant didn't actually send. (Replay with different params is
+  // already prevented above: the position is keyed by the tx hash.)
+  const treasury = resolverAddress();
+  if (!treasury) throw new Error('Treasury not configured.');
+  // Allow a 1-cent rounding slack between the quote and the on-chain transfer.
+  const minRaw = BigInt(Math.max(0, Math.floor((quote.collateral_required_usdc - 0.01) * 1e6)));
+  const escrow = await confirmUsdcEscrow(args.tx_hash, args.owner, treasury, minRaw);
+  if (!escrow.ok) {
+    throw new Error(`Open escrow not verified on-chain (USDC transfer to treasury): ${escrow.status}`);
+  }
   const realized = drawNormal(quote.market_mu, quote.market_sigma, args.tx_hash);
   const pos: ContinuousPosition = {
     id: args.tx_hash,

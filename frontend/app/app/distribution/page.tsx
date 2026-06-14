@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSignMessage } from "wagmi";
 import { Header, PageFrame } from "../_components/Header";
 import { C, FD, FM, FS, EASE } from "../_lib/tokens";
 import { monotonePath } from "../_lib/curve";
@@ -239,6 +240,13 @@ const PANEL: React.CSSProperties = {
 
 export default function DistributionPage() {
   const wallet = useWalletSigner();
+  const { signMessageAsync } = useSignMessage();
+  // Wallet-signed authorization for settle/close — the backend recovers this and
+  // requires it equals the position owner (owner+id in the body is not auth).
+  const signExitAuth = useCallback(
+    (message: string) => signMessageAsync({ message }),
+    [signMessageAsync],
+  );
   const activeAddress = useActiveWalletAddress();
   const signEscrow = useContinuousEscrow();
 
@@ -393,7 +401,7 @@ export default function DistributionPage() {
     setSettling(positionId);
     setError(null);
     try {
-      const r = await settleContinuousPosition({ owner: activeAddress, positionId });
+      const r = await settleContinuousPosition({ owner: activeAddress, positionId, signMessage: signExitAuth });
       setSettleResults((prev) => ({ ...prev, [positionId]: r }));
       refreshPositions();
       usdc.refresh();
@@ -410,7 +418,7 @@ export default function DistributionPage() {
     setClosing(positionId);
     setError(null);
     try {
-      const r = await closeContinuousPosition({ owner: activeAddress, positionId });
+      const r = await closeContinuousPosition({ owner: activeAddress, positionId, signMessage: signExitAuth });
       setCloseResults((prev) => ({ ...prev, [positionId]: r }));
       refreshPositions();
       usdc.refresh();

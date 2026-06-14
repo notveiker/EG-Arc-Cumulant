@@ -1,0 +1,78 @@
+---
+# Akash SDL — Cumulant backend, BUILT FROM SOURCE at container start.
+# No Docker image / registry needed: the container clones the repo, installs, and
+# builds on boot. Use this if you don't want to build & push a Docker image.
+#
+# PREREQUISITES:
+#   1. Push the CURRENT code (incl. the Flow backend) to GitHub:
+#        git add -A && git commit -m "flow + dynamic" && git push origin main
+#   2. The repo must be reachable by the container — public is simplest (the repo
+#      has NO secrets: .env is gitignored; only .env.shared / contracts are committed).
+#      If it must stay private, use the image-based SDL instead.
+#
+# Secrets below are placeholders — enter the real values in the Akash Console env
+# editor (NOT committed). After the lease is up, the Flow webhook target is
+#   https://<lease-host>/api/flow/webhook
+version: "2.0"
+
+services:
+  backend:
+    image: node:22-alpine
+    expose:
+      - port: 13201
+        as: 80
+        to:
+          - global: true
+    command:
+      - sh
+      - -c
+    args:
+      - >
+        apk add --no-cache git &&
+        git clone --depth 1 https://github.com/notveiker/EG-Arc-Cumulant.git /app &&
+        cd /app/backend &&
+        npm ci &&
+        npm run build &&
+        node dist/index.js
+    env:
+      # --- chain + public config (safe) ---
+      - CUMULANT_CHAIN=arc
+      - BACKEND_PORT=13201
+      - ARC_TESTNET_RPC_URL=https://rpc.testnet.arc.network
+      - ARC_EXPLORER_URL=https://testnet.arcscan.app
+      - FRONTEND_URL=https://REPLACE_WITH_VERCEL_ORIGIN
+      - POLYMARKET_PROXY_URL=
+      # --- SECRETS: set in the Akash Console env editor (not in git) ---
+      - DEPLOYER_PRIVATE_KEY=REPLACE_IN_CONSOLE
+      - RESOLVER_API_SECRET=REPLACE_IN_CONSOLE
+      - DYNAMIC_WEBHOOK_SECRET=REPLACE_AFTER_WEBHOOK
+      # --- Supabase persistence: REQUIRED for a prod-like / multi-instance deploy ---
+      # Unset → distribution + note position stores fall back to single-instance, file-backed
+      # state that a multi-replica or restart-prone lease will lose or split. On-chain reads +
+      # Polymarket proxying still work unset; the off-chain position ledger does not scale out.
+      - SUPABASE_URL=
+      - SUPABASE_SERVICE_KEY=REPLACE_IN_CONSOLE
+      - SUPABASE_ANON_KEY=REPLACE_IN_CONSOLE
+
+profiles:
+  compute:
+    backend:
+      resources:
+        cpu:
+          units: 1.0
+        memory:
+          size: 1Gi
+        storage:
+          size: 2Gi
+  placement:
+    dcloud:
+      pricing:
+        backend:
+          denom: uakt
+          amount: 100000
+
+deployment:
+  backend:
+    dcloud:
+      profile: backend
+      count: 1
