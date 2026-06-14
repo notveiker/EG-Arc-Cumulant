@@ -44,6 +44,7 @@ import marketsRouter from "./routes/markets.js";
 import bundlesRouter from "./routes/bundles.js";
 import flowRouter from "./routes/flow.js";
 import faucetRouter from "./routes/faucet.js";
+import mmRouter from "./routes/mm.js";
 // (receipts/audit-trail feature removed upstream — mirrors Cumulant b205d60)
 
 const app = express();
@@ -301,6 +302,9 @@ app.use("/api/portfolio", portfolioRouter);
 app.use("/api/flow", flowRouter);
 // Test-USDC faucet: mint 10,000 MockUSDC to a connected wallet (deployer-signed gas).
 app.use("/api/faucet", faucetRouter);
+// MM secondary market: owner-signed pre-settlement bid quotes for sellToMM (off-chain
+// pricing/signing; the user submits the sell on-chain). Buys + sells settle on chain.
+app.use("/api/mm", mmRouter);
 
 // ── Resolver (server-owned admin role only) ──────────────────────────────────
 // This is the ONLY signing the backend does. User trading is wallet-signed client-side.

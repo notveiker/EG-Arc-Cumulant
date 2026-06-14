@@ -5,6 +5,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {PredictionMarket} from "./PredictionMarket.sol";
 
 /// @title Cumulant BasketVault
@@ -23,6 +25,8 @@ import {PredictionMarket} from "./PredictionMarket.sol";
 ///         are internal accounting (not yet an ERC-1155); tokenizing them is a documented v2 step.
 contract BasketVault is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
+    using ECDSA for bytes32;
+    using MessageHashUtils for bytes32;
 
     uint16 internal constant BPS = 10_000;
     uint256 internal constant MAX_LEGS = 40;
@@ -49,10 +53,15 @@ contract BasketVault is ReentrancyGuard, Ownable {
     mapping(uint256 => mapping(address => uint256)) private _shares; // basketId => user => shares
     mapping(uint256 => bool) public marketAssigned; // marketId => already backs a basket
 
+    /// USDC the protocol market-maker has posted to buy positions back before settlement.
+    uint256 public mmReserve;
+
     event BasketCreated(uint256 indexed basketId, address indexed creator, string name, uint256 legCount);
     event Deposited(uint256 indexed basketId, address indexed depositor, uint256 amount, uint256 sharesMinted);
     event Settled(uint256 indexed basketId, uint256 recovered, uint256 totalShares);
     event Redeemed(uint256 indexed basketId, address indexed redeemer, uint256 shares, uint256 payout);
+    event MmReserveFunded(address indexed from, uint256 amount, uint256 reserve);
+    event SoldToMM(uint256 indexed basketId, address indexed seller, uint256 shares, uint256 payout);
 
     error LengthMismatch();
     error NoLegs();
@@ -68,6 +77,9 @@ contract BasketVault is ReentrancyGuard, Ownable {
     error TooManyLegs();
     error EmptyName();
     error DepositTooSmall();
+    error BadQuote();
+    error ReserveTooLow();
+    error QuoteExpired();
 
     constructor(PredictionMarket market_) Ownable(msg.sender) {
         market = market_;
@@ -199,6 +211,49 @@ contract BasketVault is ReentrancyGuard, Ownable {
             usdc.safeTransfer(msg.sender, payout);
         }
         emit Redeemed(basketId, msg.sender, shares, payout);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Secondary market — sell back to the protocol market-maker pre-settlement
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// @notice Post USDC liquidity the market-maker uses to buy positions back before
+    ///         settlement. Tracked separately from settled `recovered` so a sell can
+    ///         never dip into shareholders' redeemable funds.
+    function fundMmReserve(uint256 amount) external {
+        if (amount == 0) revert ZeroAmount();
+        usdc.safeTransferFrom(msg.sender, address(this), amount);
+        mmReserve += amount;
+        emit MmReserveFunded(msg.sender, amount, mmReserve);
+    }
+
+    /// @notice Sell basket shares back to the protocol market-maker BEFORE settlement at a
+    ///         price the MM (owner) signed off-chain. The MM warehouses the position (it
+    ///         receives the shares and redeems them at settlement); the seller is paid
+    ///         immediately from the MM reserve. `payout` is USDC base units; the quote is
+    ///         bound to (chain, vault, basket, seller, shares, payout, deadline) so it can't
+    ///         be replayed for a different seller/size/price.
+    function sellToMM(uint256 basketId, uint256 shares, uint256 payout, uint256 deadline, bytes calldata sig)
+        external
+        nonReentrant
+    {
+        Basket storage b = _basket(basketId);
+        if (b.settled) revert AlreadySettled();
+        if (shares == 0) revert ZeroAmount();
+        if (block.timestamp > deadline) revert QuoteExpired();
+        uint256 bal = _shares[basketId][msg.sender];
+        if (shares > bal) revert InsufficientShares();
+
+        bytes32 digest =
+            keccak256(abi.encode(block.chainid, address(this), basketId, msg.sender, shares, payout, deadline));
+        if (digest.toEthSignedMessageHash().recover(sig) != owner()) revert BadQuote();
+        if (payout > mmReserve) revert ReserveTooLow();
+
+        _shares[basketId][msg.sender] = bal - shares;
+        _shares[basketId][owner()] += shares; // MM warehouses; redeems pro-rata at settlement
+        mmReserve -= payout;
+        if (payout > 0) usdc.safeTransfer(msg.sender, payout);
+        emit SoldToMM(basketId, msg.sender, shares, payout);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
