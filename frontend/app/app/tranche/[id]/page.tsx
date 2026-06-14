@@ -63,12 +63,15 @@ type ResolvedBasket =
   | { kind: "missing" };
 
 /**
- * The tranche kinds a user can actually transact. The on-chain TrancheVault
- * only has senior + junior; mezzanine is illustrative-only on the distribution
- * chart and is never selectable / depositable / sellable.
+ * The tranche kinds a user can transact — the full senior / mezzanine / junior
+ * waterfall. The on-chain TrancheVault models a single `bool senior`: senior is
+ * the protected slice, while mezzanine and junior both ride the subordinate
+ * (first-loss) slice on-chain. Their distinct attach/detach + pricing live in
+ * the off-chain quote + ledger, so all three are selectable, depositable, and
+ * sellable.
  */
-type ActionableKind = Exclude<TrancheKind, "mezzanine">;
-const ACTIONABLE_KINDS: readonly ActionableKind[] = ["senior", "junior"];
+type ActionableKind = TrancheKind;
+const ACTIONABLE_KINDS: readonly ActionableKind[] = ["senior", "mezzanine", "junior"];
 
 export default function TrancheDetail() {
   const params = useParams<{ id: string }>();
@@ -77,18 +80,13 @@ export default function TrancheDetail() {
   const basketState = useLiveBaskets();
   // Pre-select the tab from ?tier=… when the user lands here via an AI rec.
   const queryTier = search?.get("tier");
-  // The on-chain TrancheVault models only senior/junior (a single `bool
-  // senior`); mezzanine is illustrative-only (see the 3-band chart) and has no
-  // settleable slice. So the actionable selector is senior/junior ONLY and the
-  // default kind can never be mezzanine — a `?tier=mezzanine` deep link (or any
-  // unrecognised value) lands on senior rather than throwing at deposit time.
+  // Pre-select senior / mezzanine / junior from a `?tier=…` deep link (an AI
+  // rec or a waterfall click); anything unrecognised lands on senior.
   const initialKind: ActionableKind =
-    queryTier === "senior" || queryTier === "junior" ? queryTier : "senior";
-  const [selectedKind, setSelectedKindRaw] = useState<ActionableKind>(initialKind);
-  // Hard guard: never let the selection become mezzanine, regardless of where
-  // the request comes from (waterfall card, buy-panel tabs, deep link).
-  const setSelectedKind = (k: TrancheKind) =>
-    setSelectedKindRaw(k === "mezzanine" ? "senior" : k);
+    queryTier === "senior" || queryTier === "mezzanine" || queryTier === "junior"
+      ? queryTier
+      : "senior";
+  const [selectedKind, setSelectedKind] = useState<ActionableKind>(initialKind);
   // Amount from ?amount=… so we can surface it in the buy card.
   const rawAmount = search?.get("amount");
   const recommendedAmount =
@@ -879,22 +877,10 @@ function WaterfallCard({
       >
         {quotes.map((q) => {
           const active = q.kind === selectedKind;
-          // Mezzanine is illustrative-only (no on-chain slice). Render its card
-          // dimmed and non-selectable so the payout-order viz still shows three
-          // bands, but the user can only act on senior/junior.
-          const illustrative = q.kind === "mezzanine";
           return (
             <button
               key={q.kind}
-              onClick={() => {
-                if (!illustrative) onSelect(q.kind);
-              }}
-              disabled={illustrative}
-              title={
-                illustrative
-                  ? "Mezzanine is illustrative only — senior/junior are tradeable on-chain."
-                  : undefined
-              }
+              onClick={() => onSelect(q.kind)}
               style={{
                 textAlign: "left",
                 background: active ? `${trancheColor(q.kind)}10` : C.surface,
@@ -903,8 +889,7 @@ function WaterfallCard({
                 }`,
                 borderRadius: 10,
                 padding: "10px 12px",
-                cursor: illustrative ? "not-allowed" : "pointer",
-                opacity: illustrative ? 0.55 : 1,
+                cursor: "pointer",
                 transition: `background 0.15s ${EASE}, border-color 0.15s ${EASE}`,
               }}
             >
@@ -919,19 +904,6 @@ function WaterfallCard({
                 }}
               >
                 {q.kind}
-                {illustrative && (
-                  <span
-                    style={{
-                      marginLeft: 6,
-                      fontSize: 8.5,
-                      letterSpacing: "0.06em",
-                      color: C.textMuted,
-                      fontWeight: 500,
-                    }}
-                  >
-                    · illustrative
-                  </span>
-                )}
               </div>
               <div
                 style={{
@@ -1013,24 +985,13 @@ function SegmentedSelectorBar({
       {quotes.map((q) => {
         const active = q.kind === selectedKind;
         const color = trancheColor(q.kind);
-        // Mezzanine band stays in the bar for the payout-order visual but is
-        // not selectable — only senior/junior settle on-chain.
-        const illustrative = q.kind === "mezzanine";
         return (
           <button
             key={q.kind}
             type="button"
             role="tab"
             aria-selected={active}
-            disabled={illustrative}
-            title={
-              illustrative
-                ? "Mezzanine is illustrative only — senior/junior are tradeable on-chain."
-                : undefined
-            }
-            onClick={() => {
-              if (!illustrative) onSelect(q.kind);
-            }}
+            onClick={() => onSelect(q.kind)}
             style={{
               height: 44,
               borderRadius: 8,
@@ -1039,8 +1000,7 @@ function SegmentedSelectorBar({
                 : `${color}12`,
               border: `0.5px solid ${active ? color : `${color}33`}`,
               boxShadow: active ? `0 0 14px ${color}22, inset 0 1px 0 ${color}2e` : "none",
-              cursor: illustrative ? "not-allowed" : "pointer",
-              opacity: illustrative ? 0.5 : 1,
+              cursor: "pointer",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -1366,13 +1326,6 @@ function TrancheBuyPanel({
 
   async function handlePrimary() {
     if (!canSubmit) return;
-    // Defensive: the on-chain TrancheVault has no mezzanine slice. The selector
-    // can't reach this state (senior/junior only), but never emit a mezzanine
-    // deposit even if a future change lets it through.
-    if (selected.kind === "mezzanine") {
-      setTxError("Mezzanine isn't settleable on-chain — choose senior or junior.");
-      return;
-    }
     setTxError(null);
     setTxSignature(null);
     setTxStage("preparing");
@@ -1464,13 +1417,6 @@ function TrancheBuyPanel({
 
   async function handleExecuteSell() {
     if (!appConnected || !sellRfq || sellBusy) return;
-    // Defensive: never route a mezzanine sell — it has no on-chain slice and
-    // would otherwise be mis-mapped into the junior (first-loss) bucket. The
-    // selector is senior/junior only, so this is unreachable in practice.
-    if (selected.kind === "mezzanine") {
-      setSellError("Mezzanine isn't settleable on-chain — choose senior or junior.");
-      return;
-    }
     const executable = sellRfq.filter(
       (q) => q.status === "can_execute_onchain",
     );
@@ -1657,9 +1603,9 @@ function TrancheBuyPanel({
           </div>
         </div>
 
-        {/* Tranche selector tabs — senior/junior ONLY. Mezzanine is shown on
-            the distribution chart as an illustrative middle band but has no
-            on-chain slice, so it is not a transactable choice here. */}
+        {/* Tranche selector tabs — the full senior / mezzanine / junior
+            waterfall. Senior is the protected slice; mezzanine and junior ride
+            the subordinate slice on-chain with their own off-chain pricing. */}
         <div
           role="tablist"
           aria-label="Tranche"
@@ -1671,9 +1617,7 @@ function TrancheBuyPanel({
             border: `0.5px solid ${C.border}`,
           }}
         >
-          {quotes
-            .filter((q) => q.kind !== "mezzanine")
-            .map((q) => {
+          {quotes.map((q) => {
             const active = q.kind === selected.kind;
             return (
               <button
