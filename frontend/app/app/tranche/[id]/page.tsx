@@ -37,11 +37,12 @@ import {
   fetchTrancheSellRfq,
   ppnDeposit,
   ppnRedeem,
-  ppnCloseEarly,
   PpnError,
   usePpnSigner,
   type TrancheSellRfqQuote,
 } from "../../_lib/ppn-client";
+import { useCumulant } from "@/lib/tx";
+import { sellToMMFromBundle, MmError } from "../../_lib/mm-client";
 
 const WINDOW_LABEL: Record<"week" | "month" | "long", string> = {
   week: "Short term",
@@ -1043,6 +1044,7 @@ function TrancheBuyPanel({
   // instead of the sandbox reducer counter.
   const wallet = useWalletSigner();
   const { signDeposit, signRedeem } = usePpnSigner();
+  const cumulant = useCumulant();
   const usdc = useUsdcBalance();
   const appConnected = wallet.connected;
   // Seed the amount input from the AI-recommended deposit when a user
@@ -1382,14 +1384,32 @@ function TrancheBuyPanel({
       // is a full unwind + 5 bps strategy fee + 30 bps vault fee on the
       // basket sleeve. The RFQ response tells us which is which via
       // `matured`.
+      // Matured lots redeem on-chain (cheaper, no early-exit fee). Pre-settlement
+      // lots sell to the protocol market-maker (`sellToMM`) — `redeem`/`close_early`
+      // revert NotSettled before the tranche settles. One MM sell unwinds the whole
+      // senior/junior slice for this bundle (the backend defaults to the full
+      // on-chain balance when no size is given), so we only fire it once.
       let lastTxHash: string | null = null;
       let proceeds = 0;
+      let didMmSell = false;
       for (const q of executable) {
-        const res = q.matured
-          ? await ppnRedeem({ wallet, vaultId: q.vault_id, signNote: signRedeem })
-          : await ppnCloseEarly({ wallet, vaultId: q.vault_id, signNote: signRedeem });
-        lastTxHash = res.signature ?? lastTxHash;
-        proceeds += q.onchain_expected_usdc ?? q.indicative_usdc ?? 0;
+        if (q.matured) {
+          const res = await ppnRedeem({ wallet, vaultId: q.vault_id, signNote: signRedeem });
+          lastTxHash = res.signature ?? lastTxHash;
+          proceeds += q.onchain_expected_usdc ?? q.indicative_usdc ?? 0;
+        } else if (!didMmSell) {
+          const res = await sellToMMFromBundle({
+            wallet,
+            cumulant,
+            bundleId: bundle.id,
+            productType: "tranche",
+            sizeUsdc: 0, // full senior/junior position; backend clamps to balance
+            trancheKind: selected.kind === "senior" ? "senior" : "junior",
+          });
+          lastTxHash = res.signature ?? lastTxHash;
+          proceeds += res.quote.payout_usdc;
+          didMmSell = true;
+        }
       }
       if (IS_LEGACY) {
         dispatch({
@@ -1408,7 +1428,11 @@ function TrancheBuyPanel({
       setTxSignature(lastTxHash);
       void usdc.refresh();
     } catch (err) {
-      setSellError(err instanceof PpnError ? err.message : friendlyWalletError(err));
+      setSellError(
+        err instanceof PpnError || err instanceof MmError
+          ? err.message
+          : friendlyWalletError(err),
+      );
     } finally {
       setSellBusy(false);
     }

@@ -274,6 +274,71 @@ export function useCumulant() {
     [wait, writeGuarded],
   );
 
+  // ── MM secondary market (pre-settlement exit at an owner-signed quote) ───────
+  // The backend prices + signs the quote; the user submits the sell here. No USDC
+  // approval needed — the seller is PAID (the vault transfers from its MM reserve).
+
+  const sellBasketToMM = useCallback(
+    async (
+      vault: Address,
+      basketId: number,
+      shares: bigint,
+      payout: bigint,
+      deadline: bigint,
+      signature: `0x${string}`,
+    ) => {
+      const hash = await writeGuarded({
+        address: vault,
+        abi: basketVaultAbi,
+        functionName: "sellToMM",
+        args: [BigInt(basketId), shares, payout, deadline, signature],
+      });
+      return wait(hash);
+    },
+    [wait, writeGuarded],
+  );
+
+  const sellTrancheToMM = useCallback(
+    async (
+      vault: Address,
+      trancheId: number,
+      shares: bigint,
+      senior: boolean,
+      payout: bigint,
+      deadline: bigint,
+      signature: `0x${string}`,
+    ) => {
+      const hash = await writeGuarded({
+        address: vault,
+        abi: trancheVaultAbi,
+        functionName: "sellToMM",
+        args: [BigInt(trancheId), shares, senior, payout, deadline, signature],
+      });
+      return wait(hash);
+    },
+    [wait, writeGuarded],
+  );
+
+  const sellNoteToMM = useCallback(
+    async (
+      note: Address,
+      noteId: number,
+      principal: bigint,
+      payout: bigint,
+      deadline: bigint,
+      signature: `0x${string}`,
+    ) => {
+      const hash = await writeGuarded({
+        address: note,
+        abi: protectedNoteAbi,
+        functionName: "sellToMM",
+        args: [BigInt(noteId), principal, payout, deadline, signature],
+      });
+      return wait(hash);
+    },
+    [wait, writeGuarded],
+  );
+
   return {
     buy,
     claim,
@@ -289,5 +354,8 @@ export function useCumulant() {
     depositNote,
     settleNote,
     redeemNote,
+    sellBasketToMM,
+    sellTrancheToMM,
+    sellNoteToMM,
   };
 }

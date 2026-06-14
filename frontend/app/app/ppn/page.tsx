@@ -28,6 +28,8 @@ import {
   usePpnSigner,
 } from "../_lib/ppn-client";
 import { mergePpnVaults, mergeTranches } from "../_lib/ppn-hydrate";
+import { useCumulant } from "@/lib/tx";
+import { sellToMMFromBundle, MmError } from "../_lib/mm-client";
 import {
   DistributionCandidate,
   fetchDistributionCandidates,
@@ -231,6 +233,7 @@ export default function PpnPage() {
   const basketState = useLiveBaskets();
   const wallet = useWalletSigner();
   const { signDeposit, signRedeem } = usePpnSigner();
+  const cumulant = useCumulant();
   const activeAddress = useActiveWalletAddress();
   const usdc = useUsdcBalance();
   const appConnected = wallet.connected;
@@ -513,8 +516,41 @@ export default function PpnPage() {
   }
 
   function handleExitError(rowKey: string, err: unknown) {
-    const message = err instanceof PpnError ? err.message : friendlyWalletError(err);
+    const message =
+      err instanceof PpnError || err instanceof MmError
+        ? err.message
+        : friendlyWalletError(err);
     setRedeemError((prev) => ({ ...prev, [rowKey]: message }));
+  }
+
+  /**
+   * Pre-settlement exit: sell the note back to the protocol market-maker at its
+   * owner-signed bid (paid instantly from the MM reserve; the desk warehouses the
+   * note to settlement). This is the correct early exit — `redeem` reverts
+   * NotSettled before the note settles. Matured notes use "Withdraw" instead.
+   */
+  async function runMmSell(rowKey: string, bundleId: string, principal: number) {
+    if (!appConnected || redeemBusyId) return;
+    setRedeemBusyId(rowKey);
+    setRedeemError((prev) => {
+      const next = { ...prev };
+      delete next[rowKey];
+      return next;
+    });
+    try {
+      await sellToMMFromBundle({
+        wallet,
+        cumulant,
+        bundleId,
+        productType: "note",
+        sizeUsdc: Number.isFinite(principal) ? principal : 0,
+      });
+      await finishExitFlow(rowKey);
+    } catch (err) {
+      handleExitError(rowKey, err);
+    } finally {
+      setRedeemBusyId(null);
+    }
   }
 
   async function runExit(rowKey: string, vaultIds: string[], action: "withdraw" | "divest" | "close") {
@@ -554,8 +590,12 @@ export default function PpnPage() {
       const elapsed = Math.max(0, (renderNow - createdAt) / 86_400_000);
       const daysLeft = Math.max(0, maturityDays - Math.floor(elapsed));
       const vaultIds = note.allVaultIds ?? [note.id];
-       
-      await runExit(note.id, vaultIds, daysLeft <= 0 ? "withdraw" : "close");
+      // Matured → withdraw principal+coupon on-chain; pre-settlement → sell to the MM.
+      if (daysLeft <= 0) {
+        await runExit(note.id, vaultIds, "withdraw");
+      } else {
+        await runMmSell(note.id, note.bundleId, Number.isFinite(note.principal) ? note.principal : 0);
+      }
     }
   }
 
@@ -815,13 +855,10 @@ export default function PpnPage() {
                           </div>
                           <div className="ppn-position-actions">
                             <button type="button" disabled={!appConnected || busy || !matured} onClick={() => runExit(note.id, vaultIds, "withdraw")}>
-                              Withdraw
+                              {busy && matured ? "Withdrawing…" : "Withdraw"}
                             </button>
-                            <button type="button" disabled={!appConnected || busy} onClick={() => runExit(note.id, vaultIds, "divest")}>
-                              Divest
-                            </button>
-                            <button type="button" disabled={!appConnected || busy} onClick={() => runExit(note.id, vaultIds, "close")}>
-                              Close
+                            <button type="button" disabled={!appConnected || busy || matured} onClick={() => runMmSell(note.id, note.bundleId, principal)}>
+                              {busy && !matured ? "Selling…" : "Sell to MM"}
                             </button>
                           </div>
                         </div>
