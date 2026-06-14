@@ -75,6 +75,19 @@ export const trancheVaultAbi = [
   },
   {
     "type": "function",
+    "name": "fundMmReserve",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "getLegs",
     "inputs": [
       {
@@ -209,6 +222,19 @@ export const trancheVaultAbi = [
   },
   {
     "type": "function",
+    "name": "mmReserve",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "owner",
     "inputs": [],
     "outputs": [
@@ -253,6 +279,44 @@ export const trancheVaultAbi = [
     "type": "function",
     "name": "renounceOwnership",
     "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "sellToMM",
+    "inputs": [
+      {
+        "name": "trancheId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "senior",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "payout",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "deadline",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "sig",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -370,6 +434,31 @@ export const trancheVaultAbi = [
   },
   {
     "type": "event",
+    "name": "MmReserveFunded",
+    "inputs": [
+      {
+        "name": "from",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "reserve",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "OwnershipTransferred",
     "inputs": [
       {
@@ -457,6 +546,43 @@ export const trancheVaultAbi = [
   },
   {
     "type": "event",
+    "name": "SoldToMM",
+    "inputs": [
+      {
+        "name": "trancheId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "seller",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "senior",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "payout",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "TrancheCreated",
     "inputs": [
       {
@@ -493,6 +619,11 @@ export const trancheVaultAbi = [
   },
   {
     "type": "error",
+    "name": "BadQuote",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "BadWeights",
     "inputs": []
   },
@@ -505,6 +636,33 @@ export const trancheVaultAbi = [
     "type": "error",
     "name": "DepositTooSmall",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ECDSAInvalidSignature",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ECDSAInvalidSignatureLength",
+    "inputs": [
+      {
+        "name": "length",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ECDSAInvalidSignatureS",
+    "inputs": [
+      {
+        "name": "s",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
   },
   {
     "type": "error",
@@ -587,7 +745,17 @@ export const trancheVaultAbi = [
   },
   {
     "type": "error",
+    "name": "QuoteExpired",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "ReentrancyGuardReentrantCall",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ReserveTooLow",
     "inputs": []
   },
   {

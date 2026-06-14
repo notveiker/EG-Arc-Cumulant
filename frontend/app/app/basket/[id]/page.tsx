@@ -36,6 +36,7 @@ import {
 import { usePbuBalances } from "../../_lib/portfolio-client";
 import { groupVirtualByUiBundle, clearVirtualPositionsByUiBundleId } from "../../_lib/virtual-positions";
 import { fetchVaultPrice } from "../../../lib/api";
+import { fetchMmQuote, sellToMMFromBundle, MmError, type MmQuote } from "../../_lib/mm-client";
 
 type ResolvedBasket =
   | { kind: "live"; basket: LiveBasket }
@@ -684,6 +685,9 @@ function BasketBuyPanel({
   const [mode, setMode] = useState<TradeMode>("buy");
   const [amount, setAmount] = useState<string>("100");
   const [sellQtyInput, setSellQtyInput] = useState<string>("");
+  // Live MM bid for a pre-settlement sell (the protocol market-maker's signed quote).
+  const [mmQuote, setMmQuote] = useState<MmQuote | null>(null);
+  const [mmQuoteLoading, setMmQuoteLoading] = useState(false);
   const [books, setBooks] = useState<Map<string, Orderbook>>(new Map());
   const [bookStatus, setBookStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
   // On-chain submission state — mirrors the prepare/sign/confirm lifecycle of
@@ -902,10 +906,70 @@ function BasketBuyPanel({
   const sellOverPosition = hasSellQty && sellQty > heldQty + 1e-6;
   const sellOverCap = hasSellQty && sellUsdcNotional > MAX_ORDER_USDC;
 
+  // Pre-settlement sells route to the MM secondary market; settled baskets redeem
+  // on-chain. While ACTIVE, fetch a fresh owner-signed bid (debounced) whenever the
+  // user has a valid sell quantity, so the "You receive" reflects the real payout.
+  const sellIsMm = vaultState !== "finalized";
+  useEffect(() => {
+    if (
+      mode !== "sell" ||
+      !sellIsMm ||
+      !appConnected ||
+      !wallet.address ||
+      !hasSellQty ||
+      sellOverPosition ||
+      sellOverCap ||
+      heldQty <= 0
+    ) {
+      setMmQuote(null);
+      setMmQuoteLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const ctrl = new AbortController();
+    setMmQuoteLoading(true);
+    const t = setTimeout(() => {
+      fetchMmQuote({
+        bundleId: bundle.id,
+        productType: "basket",
+        walletAddress: wallet.address as string,
+        sizeUsdc: sellQty,
+        signal: ctrl.signal,
+      })
+        .then((q) => {
+          if (!cancelled) setMmQuote(q);
+        })
+        .catch(() => {
+          if (!cancelled) setMmQuote(null);
+        })
+        .finally(() => {
+          if (!cancelled) setMmQuoteLoading(false);
+        });
+    }, 350);
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+      clearTimeout(t);
+    };
+  }, [
+    mode,
+    sellIsMm,
+    appConnected,
+    wallet.address,
+    hasSellQty,
+    sellOverPosition,
+    sellOverCap,
+    heldQty,
+    sellQty,
+    bundle.id,
+  ]);
+
   const canBuy =
     appConnected && hasAmount && !insufficient && !overCap && !txBusy;
-  // BasketVault has no active early-exit on-chain — `redeem` only succeeds once the basket
-  // is settled (finalized). Gate sell to finalized so it can't revert NotSettled.
+  // Two exit paths: a SETTLED basket redeems its pro-rata USDC on-chain; an ACTIVE
+  // basket sells pre-settlement to the protocol market-maker (`sellToMM`) at the
+  // owner-signed bid. So a sell is allowed once finalized, OR while active with a
+  // fresh MM quote in hand.
   const canSell =
     appConnected &&
     hasSellQty &&
@@ -913,7 +977,7 @@ function BasketBuyPanel({
     !sellOverCap &&
     heldQty > 0 &&
     !txBusy &&
-    vaultState === "finalized";
+    (vaultState === "finalized" || (sellIsMm && mmQuote != null));
 
   // ---- Submit -------------------------------------------------------
   //
@@ -962,24 +1026,45 @@ function BasketBuyPanel({
       setTxSignature(null);
       setTxStage("preparing");
       try {
-        const result = await redeemFromBundle({
-          wallet,
-          cumulant,
-          config: chainConfig,
-          bundleId: bundle.id,
-          // Pass quantity so partial redeems work correctly on-chain.
-          amountTokens: sellQty > 0 ? sellQty : undefined,
-          onStage: (s) => setTxStage(s),
-        });
+        let signature: string;
+        let payoutUsdc: number;
+        if (vaultState === "finalized") {
+          // Settled: redeem the pro-rata USDC pool on-chain.
+          const result = await redeemFromBundle({
+            wallet,
+            cumulant,
+            config: chainConfig,
+            bundleId: bundle.id,
+            // Pass quantity so partial redeems work correctly on-chain.
+            amountTokens: sellQty > 0 ? sellQty : undefined,
+            onStage: (s) => setTxStage(s),
+          });
+          signature = result.signature;
+          payoutUsdc = result.prepare.expected_usdc;
+        } else {
+          // Active: sell pre-settlement to the protocol market-maker at its signed bid.
+          const result = await sellToMMFromBundle({
+            wallet,
+            cumulant,
+            bundleId: bundle.id,
+            productType: "basket",
+            sizeUsdc: sellQty,
+            quote: mmQuote,
+            onStage: (s) => setTxStage(s),
+          });
+          signature = result.signature;
+          payoutUsdc = result.quote.payout_usdc;
+        }
         setTxStage("done");
-        setTxSignature(result.signature);
+        setTxSignature(signature);
         dispatch({
           type: "basket/redeem",
           bundleId: bundle.id,
           qty: sellQty,
-          payoutUsdc: result.prepare.expected_usdc,
+          payoutUsdc,
         });
         setSellQtyInput("");
+        setMmQuote(null);
         // Full exit: drop the local (virtual) position so the basket card doesn't
         // linger as a phantom after the sell. Mirrors the Portfolio page's redeem.
         if (activeAddress && resolvedBundleUuid && sellQty >= heldQty - 1e-6) {
@@ -989,7 +1074,11 @@ function BasketBuyPanel({
         void pbuBalances.refresh();
       } catch (err) {
         setTxStage("idle");
-        setTxError(err instanceof DepositError ? err.message : friendlyWalletError(err));
+        setTxError(
+          err instanceof DepositError || err instanceof MmError
+            ? err.message
+            : friendlyWalletError(err),
+        );
       }
     }
   }
@@ -1023,10 +1112,12 @@ function BasketBuyPanel({
             ? "No position to sell"
             : appConnected && sellOverPosition
               ? "Exceeds held position"
-              : appConnected && vaultState !== "finalized"
-                ? "Redeem after settlement"
+              : appConnected && sellIsMm && mmQuoteLoading
+                ? "Fetching MM bid…"
+              : appConnected && sellIsMm && !mmQuote
+                ? "MM bid unavailable"
               : txStage === "preparing"
-                ? "Preparing redeem…"
+                ? "Preparing transaction…"
                 : txStage === "signing"
                   ? "Awaiting wallet signature…"
                 : txStage === "confirming"
@@ -1198,6 +1289,8 @@ function BasketBuyPanel({
             bookStatus={bookStatus}
             topLegCount={topLegs.length}
             unitLabel={bundle.id}
+            mmQuote={mmQuote}
+            mmQuoteLoading={mmQuoteLoading}
           />
         )}
 
@@ -1628,6 +1721,8 @@ function SellSection({
   accent,
   bookStatus,
   topLegCount,
+  mmQuote,
+  mmQuoteLoading,
 }: {
   connected: boolean;
   unitLabel: string;
@@ -1651,8 +1746,13 @@ function SellSection({
   accent: string;
   bookStatus: "idle" | "loading" | "ok" | "error";
   topLegCount: number;
+  mmQuote: MmQuote | null;
+  mmQuoteLoading: boolean;
 }) {
   const hasPosition = heldQty > 0;
+  // Pre-settlement exit = the protocol market-maker's signed bid (its own price
+  // band per product). Settled baskets fall back to the NAV-based redeem estimate.
+  const isMm = vaultState !== "finalized";
   const unrealized = hasPosition ? heldQty * (navPrice - avgCost) : 0;
   return (
     <>
@@ -1782,28 +1882,39 @@ function SellSection({
               marginBottom: 2,
             }}
           >
-            <span>Mid notional</span>
+            <span>{isMm ? "Position notional" : "Mid notional"}</span>
             <span style={{ color: C.textPrimary, fontFamily: FM }}>
               ${sellUsdcNotional.toFixed(2)}
             </span>
           </div>
-          <FeeRow
-            label="Protocol fee"
-            bps={sellFees.protocolBps}
-            usd={(sellUsdcNotional * sellFees.protocolBps) / 10_000}
-          />
-          <FeeRow
-            label="Desk & flow (incl. adverse)"
-            bps={sellFees.mmSpreadBps}
-            usd={(sellUsdcNotional * sellFees.mmSpreadBps) / 10_000}
-            hint="MM + informed-flow tilt (combined)"
-          />
-          <FeeRow
-            label="Slippage (bid side)"
-            bps={sellFees.slippageBps}
-            usd={(sellUsdcNotional * sellFees.slippageBps) / 10_000}
-            hint="live CLOB walk"
-          />
+          {isMm ? (
+            <FeeRow
+              label="MM spread"
+              bps={mmQuote ? mmQuote.spread_bps : 0}
+              usd={mmQuote ? Math.max(0, sellUsdcNotional - mmQuote.payout_usdc) : 0}
+              hint="protocol market-maker bid"
+            />
+          ) : (
+            <>
+              <FeeRow
+                label="Protocol fee"
+                bps={sellFees.protocolBps}
+                usd={(sellUsdcNotional * sellFees.protocolBps) / 10_000}
+              />
+              <FeeRow
+                label="Desk & flow (incl. adverse)"
+                bps={sellFees.mmSpreadBps}
+                usd={(sellUsdcNotional * sellFees.mmSpreadBps) / 10_000}
+                hint="MM + informed-flow tilt (combined)"
+              />
+              <FeeRow
+                label="Slippage (bid side)"
+                bps={sellFees.slippageBps}
+                usd={(sellUsdcNotional * sellFees.slippageBps) / 10_000}
+                hint="live CLOB walk"
+              />
+            </>
+          )}
           <div
             style={{
               display: "flex",
@@ -1820,7 +1931,13 @@ function SellSection({
           >
             <span>You receive</span>
             <span style={{ color: accent, fontWeight: 600 }}>
-              ${sellPayoutUsdc.toFixed(2)}
+              {isMm
+                ? mmQuote
+                  ? `$${mmQuote.payout_usdc.toFixed(2)}`
+                  : mmQuoteLoading
+                    ? "Quoting…"
+                    : "—"
+                : `$${sellPayoutUsdc.toFixed(2)}`}
             </span>
           </div>
           <div
@@ -1833,8 +1950,12 @@ function SellSection({
               marginTop: 2,
             }}
           >
-            {vaultState === "active"
-              ? "This basket has no on-chain early exit — your position redeems for its pro-rata share of the vault USDC pool once the basket settles at market resolution. The “You receive” line is a NAV-based estimate until then."
+            {isMm
+              ? mmQuote
+                ? `Pre-settlement bid from the protocol market-maker (${(mmQuote.bid_per_unit * 100).toFixed(1)}¢ on the dollar). You're paid instantly from the MM reserve and the desk warehouses your position to settlement.`
+                : mmQuoteLoading
+                  ? "Fetching a live market-maker bid…"
+                  : "No market-maker bid available right now — try again in a moment."
               : bookStatus === "loading"
                 ? "Quoting redemption impact from live Polymarket books…"
                 : sellFees.hasLiveBooks

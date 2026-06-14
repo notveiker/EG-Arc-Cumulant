@@ -5,6 +5,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {PredictionMarket} from "./PredictionMarket.sol";
 
 /// @title Cumulant TrancheVault
@@ -23,6 +25,8 @@ import {PredictionMarket} from "./PredictionMarket.sol";
 ///         settlement claims every leg exactly once (see BasketVault for the same rationale).
 contract TrancheVault is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
+    using ECDSA for bytes32;
+    using MessageHashUtils for bytes32;
 
     uint16 internal constant BPS = 10_000;
     uint256 internal constant MAX_LEGS = 40;
@@ -55,10 +59,15 @@ contract TrancheVault is ReentrancyGuard, Ownable {
     mapping(uint256 => mapping(address => uint256)) private _junior;
     mapping(uint256 => bool) public marketAssigned;
 
+    /// USDC the protocol market-maker has posted to buy positions back before settlement.
+    uint256 public mmReserve;
+
     event TrancheCreated(uint256 indexed trancheId, address indexed creator, string name, uint16 seniorCouponBps);
     event Deposited(uint256 indexed trancheId, address indexed user, bool senior, uint256 amount);
     event Settled(uint256 indexed trancheId, uint256 recovered, uint256 seniorPot, uint256 juniorPot);
     event Redeemed(uint256 indexed trancheId, address indexed user, bool senior, uint256 shares, uint256 payout);
+    event MmReserveFunded(address indexed from, uint256 amount, uint256 reserve);
+    event SoldToMM(uint256 indexed trancheId, address indexed seller, bool senior, uint256 shares, uint256 payout);
 
     error LengthMismatch();
     error NoLegs();
@@ -75,6 +84,9 @@ contract TrancheVault is ReentrancyGuard, Ownable {
     error EmptyName();
     error CouponTooHigh();
     error DepositTooSmall();
+    error BadQuote();
+    error ReserveTooLow();
+    error QuoteExpired();
 
     constructor(PredictionMarket market_) Ownable(msg.sender) {
         market = market_;
@@ -223,6 +235,55 @@ contract TrancheVault is ReentrancyGuard, Ownable {
         }
         if (payout > 0) usdc.safeTransfer(msg.sender, payout);
         emit Redeemed(trancheId, msg.sender, senior, shares, payout);
+    }
+
+    // ── Secondary market — sell back to the protocol market-maker pre-settlement ──
+
+    /// @notice Post USDC liquidity the market-maker uses to buy positions back before
+    ///         settlement (separate from the settled waterfall pots).
+    function fundMmReserve(uint256 amount) external {
+        if (amount == 0) revert ZeroAmount();
+        usdc.safeTransferFrom(msg.sender, address(this), amount);
+        mmReserve += amount;
+        emit MmReserveFunded(msg.sender, amount, mmReserve);
+    }
+
+    /// @notice Sell senior/junior shares back to the protocol market-maker BEFORE settlement at
+    ///         a price the MM (owner) signed off-chain. The MM warehouses the position and redeems
+    ///         it at settlement; the seller is paid immediately from the MM reserve.
+    function sellToMM(
+        uint256 trancheId,
+        uint256 shares,
+        bool senior,
+        uint256 payout,
+        uint256 deadline,
+        bytes calldata sig
+    ) external nonReentrant {
+        Tranche storage t = _tranche(trancheId);
+        if (t.settled) revert AlreadySettled();
+        if (shares == 0) revert ZeroAmount();
+        if (block.timestamp > deadline) revert QuoteExpired();
+
+        bytes32 digest = keccak256(
+            abi.encode(block.chainid, address(this), trancheId, msg.sender, shares, senior, payout, deadline)
+        );
+        if (digest.toEthSignedMessageHash().recover(sig) != owner()) revert BadQuote();
+        if (payout > mmReserve) revert ReserveTooLow();
+
+        if (senior) {
+            uint256 bal = _senior[trancheId][msg.sender];
+            if (shares > bal) revert InsufficientShares();
+            _senior[trancheId][msg.sender] = bal - shares;
+            _senior[trancheId][owner()] += shares; // MM warehouses; redeems at settlement
+        } else {
+            uint256 bal = _junior[trancheId][msg.sender];
+            if (shares > bal) revert InsufficientShares();
+            _junior[trancheId][msg.sender] = bal - shares;
+            _junior[trancheId][owner()] += shares;
+        }
+        mmReserve -= payout;
+        if (payout > 0) usdc.safeTransfer(msg.sender, payout);
+        emit SoldToMM(trancheId, msg.sender, senior, shares, payout);
     }
 
     // ── Views ────────────────────────────────────────────────────────────────

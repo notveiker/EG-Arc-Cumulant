@@ -58,7 +58,18 @@ contract Deploy is Script {
             // local MockUSDC; on Arc the note is created post-deploy via cast (Makefile
             // `seed-note-arc`) and baskets/tranches are funded by users.
             if (deployMock) {
-                _seedFunded(usdc, pm, basket, tranche, note);
+                _seedFunded(usdc, basket, tranche, note);
+                // Seed the secondary-market MM reserve in each vault so positions are
+                // sellable pre-settlement out of the box (the MM buys them back at its
+                // signed quote and warehouses them to settlement).
+                MockUSDC(address(usdc)).mint(deployer, 900_000e6);
+                usdc.approve(address(basket), type(uint256).max);
+                usdc.approve(address(tranche), type(uint256).max);
+                usdc.approve(address(note), type(uint256).max);
+                basket.fundMmReserve(300_000e6);
+                tranche.fundMmReserve(300_000e6);
+                note.fundMmReserve(300_000e6);
+                console2.log("MM reserves funded (300k USDC each)");
             }
         }
 
@@ -203,11 +214,12 @@ contract Deploy is Script {
         pm.createMarket("Will Meta ship consumer AR glasses?", _d(220)); // 46
         pm.createMarket("Will TikTok be banned in the US?", _d(140)); // 47
 
-        // Build 9 deep baskets (30 legs each) + a mirrored senior/junior tranche per basket. Each
-        // basket draws a disjoint 30-market slice of a freshly-minted pool (markets are exclusive to
-        // one basket), so the underlying lists are dozens deep like a real venue. The 48 curated
+        // Build 9 baskets + a mirrored senior/junior tranche per basket, each over a disjoint
+        // 2-market slice of a freshly-minted pool. Kept lean (2 legs) because the secondary-market
+        // MM quoting is simulated in the backend and only buys/sells settle on chain — the venue
+        // does not need a deep seeded book, and Arc gas is real (non-mintable) USDC. The 48 curated
         // markets above (0-47) stay standalone in the Markets book and back the protected notes.
-        uint256 LEGS = 30;
+        uint256 LEGS = 2;
         uint16 base = uint16(uint256(10_000) / LEGS); // 333 bps; leg 0 absorbs the remainder
         for (uint256 b = 0; b < 9; b++) {
             uint256[] memory ids = new uint256[](LEGS);
@@ -225,24 +237,19 @@ contract Deploy is Script {
             tranche.createTranche(_basketName(b), _coupon(b), ids, sd, w);
         }
 
-        console2.log("Seeded: 318 markets + 9 baskets + 9 tranches");
+        console2.log("Seeded (lean): 66 markets + 9 baskets + 9 tranches");
     }
 
-    /// @dev Local-only: give every market a varied two-sided book so implied odds span a realistic
-    ///      range (not a wall of 100%), then create 5 protected notes (issuer-funded) and seed
-    ///      deposits across several baskets / tranches / a note so the UI shows live TVL + real NAV
-    ///      dispersion (which is what makes the basket NAVs and tranche outcome curves read like a
-    ///      live venue).
-    function _seedFunded(IERC20 usdc, PredictionMarket pm, BasketVault basket, TrancheVault tranche, ProtectedNote note)
-        internal
-    {
+    /// @dev Local/MockUSDC-only: create 5 protected notes (issuer-funded) and seed deposits across
+    ///      several baskets / tranches / a note so the UI shows live TVL out of the box. Markets are
+    ///      left without a pre-seeded odds book (the MM quoting that drives marks is simulated in the
+    ///      backend; only buys/sells settle on chain), which keeps the deploy inside Arc's gas budget.
+    function _seedFunded(IERC20 usdc, BasketVault basket, TrancheVault tranche, ProtectedNote note) internal {
         PredictionMarket.Side Y = PredictionMarket.Side.Yes;
         PredictionMarket.Side N = PredictionMarket.Side.No;
         usdc.approve(address(note), type(uint256).max);
         usdc.approve(address(basket), type(uint256).max);
         usdc.approve(address(tranche), type(uint256).max);
-
-        _seedOdds(usdc, pm);
 
         note.createNote("ETH Upside Protected Note", 0, Y, 5e6);
         note.createNote("BTC Upside Note", 3, Y, 5e6);
@@ -270,27 +277,6 @@ contract Deploy is Script {
         note.deposit(1, 80e6);
 
         console2.log("Seeded: 5 notes + deposits");
-    }
-
-    /// @dev Stake a varied two-sided book on every market so implied YES odds span ~30%–90%
-    ///      (deterministic per market via a multiplicative hash). This gives each basket genuine
-    ///      NAV dispersion, so the basket NAVs differ and the tranche outcome distribution renders
-    ///      as a real bell instead of a degenerate spike. Local/MockUSDC only.
-    function _seedOdds(IERC20 usdc, PredictionMarket pm) internal {
-        usdc.approve(address(pm), type(uint256).max);
-        PredictionMarket.Side Y = PredictionMarket.Side.Yes;
-        PredictionMarket.Side N = PredictionMarket.Side.No;
-        uint256 count = pm.marketCount();
-        uint256 stake = 50e6; // 50 USDC two-sided per market
-        for (uint256 i = 0; i < count; i++) {
-            // Knuth multiplicative hash → a stable pseudo-random implied YES probability in bps.
-            uint256 pBps = 3000 + ((i * 2654435761) % 6000); // 30.00%–89.99%
-            uint256 yesAmt = (stake * pBps) / 10_000;
-            uint256 noAmt = stake - yesAmt;
-            pm.buy(i, Y, yesAmt);
-            pm.buy(i, N, noAmt);
-        }
-        console2.log("Seeded varied odds on markets:", count);
     }
 
     function _writeDeployment(address usdc, address pm, address basket, address tranche, address note, address resolver)

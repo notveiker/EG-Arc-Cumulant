@@ -5,6 +5,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {PredictionMarket} from "./PredictionMarket.sol";
 
 /// @title Cumulant ProtectedNote
@@ -24,6 +26,8 @@ import {PredictionMarket} from "./PredictionMarket.sol";
 ///         market backs at most one note (single on-chain position, claimed once).
 contract ProtectedNote is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
+    using ECDSA for bytes32;
+    using MessageHashUtils for bytes32;
 
     struct Note {
         string name;
@@ -43,6 +47,9 @@ contract ProtectedNote is ReentrancyGuard, Ownable {
     mapping(uint256 => mapping(address => uint256)) private _principal; // noteId => user => principal
     mapping(uint256 => bool) public marketAssigned;
 
+    /// USDC the protocol market-maker has posted to buy positions back before settlement.
+    uint256 public mmReserve;
+
     event NoteCreated(
         uint256 indexed noteId,
         address indexed issuer,
@@ -54,6 +61,8 @@ contract ProtectedNote is ReentrancyGuard, Ownable {
     event Settled(uint256 indexed noteId, uint256 coupon);
     event Redeemed(uint256 indexed noteId, address indexed user, uint256 principal, uint256 coupon);
     event Reclaimed(uint256 indexed noteId, address indexed issuer, uint256 amount);
+    event MmReserveFunded(address indexed from, uint256 amount, uint256 reserve);
+    event SoldToMM(uint256 indexed noteId, address indexed seller, uint256 principal, uint256 payout);
 
     error MarketTaken(uint256 marketId);
     error MarketResolvedAlready(uint256 marketId);
@@ -70,6 +79,10 @@ contract ProtectedNote is ReentrancyGuard, Ownable {
     error NotIssuer();
     error HasDepositors();
     error NothingToReclaim();
+    error BadQuote();
+    error ReserveTooLow();
+    error QuoteExpired();
+    error InsufficientPrincipal();
 
     constructor(PredictionMarket market_) Ownable(msg.sender) {
         market = market_;
@@ -164,6 +177,44 @@ contract ProtectedNote is ReentrancyGuard, Ownable {
         _principal[noteId][msg.sender] = 0;
         usdc.safeTransfer(msg.sender, payout);
         emit Redeemed(noteId, msg.sender, principal, couponShare);
+    }
+
+    // ── Secondary market — sell back to the protocol market-maker pre-settlement ──
+
+    /// @notice Post USDC liquidity the market-maker uses to buy positions back before
+    ///         settlement (separate from the reserved principal that backs redemptions).
+    function fundMmReserve(uint256 amount) external {
+        if (amount == 0) revert ZeroAmount();
+        usdc.safeTransferFrom(msg.sender, address(this), amount);
+        mmReserve += amount;
+        emit MmReserveFunded(msg.sender, amount, mmReserve);
+    }
+
+    /// @notice Sell note principal back to the protocol market-maker BEFORE settlement at a
+    ///         price the MM (owner) signed off-chain. The MM warehouses the principal (it
+    ///         receives it and redeems principal + coupon at settlement); the seller is paid
+    ///         immediately from the MM reserve.
+    function sellToMM(uint256 noteId, uint256 principal, uint256 payout, uint256 deadline, bytes calldata sig)
+        external
+        nonReentrant
+    {
+        Note storage note = _note(noteId);
+        if (note.settled) revert AlreadySettled();
+        if (principal == 0) revert ZeroAmount();
+        if (block.timestamp > deadline) revert QuoteExpired();
+        uint256 bal = _principal[noteId][msg.sender];
+        if (principal > bal) revert InsufficientPrincipal();
+
+        bytes32 digest =
+            keccak256(abi.encode(block.chainid, address(this), noteId, msg.sender, principal, payout, deadline));
+        if (digest.toEthSignedMessageHash().recover(sig) != owner()) revert BadQuote();
+        if (payout > mmReserve) revert ReserveTooLow();
+
+        _principal[noteId][msg.sender] = bal - principal;
+        _principal[noteId][owner()] += principal; // MM warehouses; redeems at settlement
+        mmReserve -= payout;
+        if (payout > 0) usdc.safeTransfer(msg.sender, payout);
+        emit SoldToMM(noteId, msg.sender, principal, payout);
     }
 
     /// @notice Recover the coupon of a settled note that received no deposits. Without this, an
