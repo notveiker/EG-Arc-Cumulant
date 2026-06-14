@@ -69,6 +69,13 @@ function categoryMeta(c: string): { label: string; color: string } {
 }
 
 // ---------------------------------------------------------------------------
+/** Normal probability density — for the live (un-debounced) "your view" curve. */
+function normalPdf(x: number, mu: number, sigma: number): number {
+  const s = Math.max(sigma, 1e-9);
+  const z = (x - mu) / s;
+  return Math.exp(-0.5 * z * z) / (s * Math.sqrt(2 * Math.PI));
+}
+
 // Chart: the two continuous Normal curves (market f vs your view g) + payoff.
 // ---------------------------------------------------------------------------
 function DistChart({ quote }: { quote: ContinuousQuote }) {
@@ -293,6 +300,21 @@ export default function DistributionPage() {
     };
   }, [market, mu, sigma, collateral]);
 
+  // Live chart preview: the backend quote is debounced (network round-trip), so
+  // while you drag the μ/σ sliders we recompute the "your view" curve g + the
+  // payoff (g − f) locally over the quote's grid — instantly, every render. The
+  // market curve f and the priced numbers still come from the debounced quote.
+  const displayQuote = useMemo(() => {
+    if (!quote) return null;
+    const rawG = quote.x.map((x) => normalPdf(x, mu, sigma));
+    const sumG = rawG.reduce((a, b) => a + b, 0) || 1;
+    const sumF = quote.market_pdf.reduce((a, b) => a + b, 0) || sumG;
+    const k = sumF / sumG; // match g's scale to f's (convention-agnostic)
+    const target_pdf = rawG.map((g) => g * k);
+    const trade_curve = target_pdf.map((g, i) => g - quote.market_pdf[i]);
+    return { ...quote, target_mu: mu, target_pdf, trade_curve };
+  }, [quote, mu, sigma]);
+
   // Positions for the active wallet.
   const refreshPositions = useCallback(() => {
     if (!activeAddress) {
@@ -408,7 +430,7 @@ export default function DistributionPage() {
                       style={{ borderColor: on ? C.tealLight : C.border, background: on ? C.cardHover : "transparent" }}
                     >
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", gap: 8 }}>
-                        <span style={{ fontFamily: FD, fontSize: 14, color: C.textPrimary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        <span style={{ flex: 1, minWidth: 0, fontFamily: FD, fontSize: 14, color: C.textPrimary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                           {marketName(m)}
                         </span>
                         <span
@@ -512,7 +534,7 @@ export default function DistributionPage() {
                   </div>
                 )}
               </div>
-              {quote ? <DistChart quote={quote} /> : <div style={{ height: 300 }} />}
+              {displayQuote ? <DistChart quote={displayQuote} /> : <div style={{ height: 300 }} />}
             </div>
 
             <div style={PANEL}>
@@ -648,7 +670,7 @@ export default function DistributionPage() {
         .dc-grid { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 30px; align-items: start; }
         @media (max-width: 900px) { .dc-grid { grid-template-columns: 1fr; } }
         .dc-cap { font-family: ${FM}; font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: ${C.textMuted}; }
-        .dc-market-scroll { display: grid; gap: 8px; margin-top: 12px; max-height: 296px; overflow-y: auto; padding-right: 2px; scrollbar-width: none; -ms-overflow-style: none; }
+        .dc-market-scroll { display: grid; gap: 8px; margin-top: 12px; max-height: 296px; overflow-y: auto; overflow-x: hidden; padding-right: 2px; scrollbar-width: none; -ms-overflow-style: none; }
         .dc-market-scroll::-webkit-scrollbar { width: 0; height: 0; display: none; }
         .dc-market { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 12px 14px; border: 0.5px solid ${C.border}; border-radius: 10px; cursor: pointer; text-align: left; transition: border-color 0.15s ${EASE}, background 0.15s ${EASE}; }
         .dc-market:hover { border-color: ${C.borderHover}; }
