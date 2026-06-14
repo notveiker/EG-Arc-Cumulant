@@ -362,11 +362,12 @@ export async function readVaultState(): Promise<VaultState> {
     for (const b of baskets) {
       if (!b) continue;
       const shares = safeBig(b.totalShares.raw);
-      const recovered = safeBig(b.markToWin?.raw) || safeBig(b.recovered.raw);
       totalShares += shares;
-      // Active basket: assets == issued shares (NAV 1.0 until settlement marks it).
-      // Settled basket: assets == recovered payout.
-      totalAssets += b.settled ? safeBig(b.recovered.raw) : recovered > 0n ? recovered : shares;
+      // Active basket marks at PAR (assets == issued shares → unit value ≈ the $1
+      // it was minted at; NO fake markToWin gain before resolution — that
+      // previously made a 1:1 buy "sell" for ~1.6× instantly). A SETTLED basket
+      // surfaces its realized `recovered` payout so the price reflects real P&L.
+      totalAssets += b.settled ? safeBig(b.recovered.raw) : shares;
     }
 
     const sharePrice =
@@ -465,8 +466,11 @@ export async function getVaultPrice(bundleId: string): Promise<{
     return {
       bundle_id: bundleId,
       vault_id: VAULT.basketVault,
-      issue_price: state.share_price,
-      fee_bps: state.deposit_fee_bps,
+      // Primary issuance is 1:1 with no on-chain fee (BasketVault.deposit mints
+      // `amount` units), so the BUY issue price is exactly $1 and the "You receive"
+      // line equals the deposit. Secondary-market value (NAV) is shown separately.
+      issue_price: 1,
+      fee_bps: 0,
       redeem_fee_bps: state.redeem_fee_bps,
       total_assets_usdc: fromRaw(state.total_assets_raw),
       total_shares: fromRaw(state.total_shares),
@@ -490,22 +494,25 @@ export interface DepositEconomics {
   deposit_fee_bps: number;
 }
 
-/** Compute deposit economics against the live share price. */
-export function computeDeposit(grossUsdc: number, state: VaultState): DepositEconomics {
+/**
+ * Deposit economics. BasketVault.deposit mints `sharesMinted = amount` — a flat
+ * 1:1 primary issuance with NO on-chain fee (the full deposit buys the legs).
+ * So the buy price is always $1/unit and the user receives exactly their deposit
+ * in units. (The MM-priced secondary market — NAV, slippage, desk fees — lives on
+ * the SELL/redeem side, not here.) We mirror the contract exactly so the "You
+ * receive" line equals what the chain mints, down to the unit.
+ *
+ * `state` is unused now but kept in the signature so callers don't change.
+ */
+export function computeDeposit(grossUsdc: number, _state: VaultState): DepositEconomics {
   const grossRaw = toRaw(grossUsdc);
-  const feeRaw = (grossRaw * BigInt(state.deposit_fee_bps)) / BigInt(BPS_DENOM);
-  const netRaw = grossRaw - feeRaw;
-  const totalShares = safeBig(state.total_shares);
-  const assets = safeBig(state.total_assets_raw);
-  const sharesRaw =
-    totalShares === 0n || assets === 0n ? netRaw : (netRaw * totalShares) / assets;
   return {
     gross_usdc: fromRaw(grossRaw),
-    fee_usdc: fromRaw(feeRaw),
-    net_usdc: fromRaw(netRaw),
-    expected_shares: fromRaw(sharesRaw),
-    share_price: state.share_price,
-    deposit_fee_bps: state.deposit_fee_bps,
+    fee_usdc: 0,
+    net_usdc: fromRaw(grossRaw),
+    expected_shares: fromRaw(grossRaw), // 1:1, exactly what the contract mints
+    share_price: 1,
+    deposit_fee_bps: 0,
   };
 }
 

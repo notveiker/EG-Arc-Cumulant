@@ -1740,7 +1740,7 @@ function TrancheBuyPanel({
             >
               <span>You receive</span>
               <span style={{ color: accent, fontWeight: 600 }}>
-                {order.tokensOut.toFixed(2)} CMLT-
+                {usdcAmount.toFixed(2)} CMLT-
                 {selected.kind.slice(0, 3).toUpperCase()}
               </span>
             </div>
