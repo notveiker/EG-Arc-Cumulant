@@ -50,6 +50,7 @@ import {
   confirmNoteRedeem,
   confirmTrancheRedeem,
   usdcFromRaw,
+  type EventVerification,
 } from "../services/verify.js";
 import { quoteTranches } from "../services/tranching.js";
 import { allocateNote } from "../services/ppn-allocator.js";
@@ -75,26 +76,101 @@ function safeError(e: unknown): string {
 }
 
 /**
- * Resolve a confirm's synthetic id to the on-chain product it must be verified
- * against. `note-{i}` → ProtectedNote note i; `tranche-{i}-{kind}` → TrancheVault
- * tranche i. Falls back to the bundle id (note rail) when no vault_id is given.
+ * Resolve a confirm to the SET of on-chain products it could be verifying. We
+ * then check the receipt against each candidate and keep whichever event
+ * actually matched.
+ *
+ * Why a set, not a single guess: when Supabase persistence is on, the frontend
+ * passes `vault_id` = the `ppn_vaults` row UUID, which carries no note/tranche
+ * hint. A single guess fell back to the note rail and mis-routed every TRANCHE
+ * deposit to the ProtectedNote vault → `no_matching_event`. We instead gather:
+ *   - synthetic `note-{i}` / `tranche-{i}[-kind]` vault ids,
+ *   - the Supabase vault row's `tranche_kind` (for a UUID vault_id), and
+ *   - BOTH the note and tranche the bundle maps to.
+ * Verification still requires the exact owner + id + Deposited/Redeemed event on
+ * our contract, so widening the candidate set never weakens the trust boundary.
  */
 type PpnTarget = { product: "note" | "tranche"; id: number };
-async function resolvePpnTarget(
+async function resolvePpnTargets(
   vault_id?: string,
   bundle_id?: string,
-): Promise<PpnTarget | null> {
+): Promise<PpnTarget[]> {
+  const out: PpnTarget[] = [];
+  const push = (t: PpnTarget | null | undefined) => {
+    if (t && !out.some((o) => o.product === t.product && o.id === t.id)) out.push(t);
+  };
+
+  let effectiveBundle = bundle_id;
+
   if (vault_id) {
     const n = /^note-(\d+)$/.exec(vault_id);
-    if (n) return { product: "note", id: Number(n[1]) };
-    const t = /^tranche-(\d+)-(?:senior|junior|mezzanine)$/.exec(vault_id);
-    if (t) return { product: "tranche", id: Number(t[1]) };
+    if (n) push({ product: "note", id: Number(n[1]) });
+    const t = /^tranche-(\d+)(?:-(?:senior|junior|mezzanine))?$/.exec(vault_id);
+    if (t) push({ product: "tranche", id: Number(t[1]) });
+
+    // UUID vault_id (Supabase on): load the row to learn note-vs-tranche + bundle.
+    if (!n && !t) {
+      try {
+        const vault = await getPPNVaultById(vault_id);
+        if (vault?.bundle_id) effectiveBundle = vault.bundle_id;
+        if (vault?.tranche_kind) {
+          const tr = await resolveBundleToTranche(effectiveBundle ?? "");
+          if (tr) push({ product: "tranche", id: tr.trancheId });
+        } else if (vault) {
+          const nr = await resolveBundleToNote(effectiveBundle ?? "");
+          if (nr) push({ product: "note", id: nr.noteId });
+        }
+      } catch {
+        /* DB optional */
+      }
+    }
   }
-  if (bundle_id) {
-    const ref = await resolveBundleToNote(bundle_id);
-    if (ref) return { product: "note", id: ref.noteId };
+
+  // Always add both bundle-derived candidates as a fallback (Supabase off, a
+  // missing row, or an unknown kind). Verification keeps the one that matches.
+  if (effectiveBundle) {
+    try {
+      const nr = await resolveBundleToNote(effectiveBundle);
+      if (nr) push({ product: "note", id: nr.noteId });
+    } catch {
+      /* ignore */
+    }
+    try {
+      const tr = await resolveBundleToTranche(effectiveBundle);
+      if (tr) push({ product: "tranche", id: tr.trancheId });
+    } catch {
+      /* ignore */
+    }
   }
-  return null;
+
+  return out;
+}
+
+/**
+ * Verify a deposit/redeem tx against each candidate; return the first whose
+ * on-chain event matches (and the candidate it matched), else the last failure
+ * so the caller can surface a status.
+ */
+async function verifyPpnAgainstCandidates(
+  kind: "deposit" | "redeem",
+  signature: string,
+  owner: string,
+  candidates: PpnTarget[],
+): Promise<{ v: EventVerification; target: PpnTarget } | null> {
+  let last: { v: EventVerification; target: PpnTarget } | null = null;
+  for (const c of candidates) {
+    const v =
+      kind === "deposit"
+        ? c.product === "note"
+          ? await confirmNoteDeposit(signature, owner, c.id)
+          : await confirmTrancheDeposit(signature, owner, c.id)
+        : c.product === "note"
+          ? await confirmNoteRedeem(signature, owner, c.id)
+          : await confirmTrancheRedeem(signature, owner, c.id);
+    if (v.ok) return { v, target: c };
+    last = { v, target: c };
+  }
+  return last;
 }
 
 /** Map a sanitized error message to an HTTP status (ported from Cumulant). */
@@ -319,15 +395,20 @@ router.post("/onchain/confirm", async (req: Request, res: Response) => {
     // ProtectedNote / TrancheVault, for THIS wallet + note/tranche id — not just
     // "some tx that succeeded". Rejects a tx to the wrong contract/function and a
     // tx signed by a different wallet.
-    const target = await resolvePpnTarget(vault_id, bundle_id);
-    if (!target) {
+    const candidates = await resolvePpnTargets(vault_id, bundle_id);
+    if (candidates.length === 0) {
       return fail(res, 400, "could not resolve the on-chain note/tranche for this confirm");
     }
-    const v =
-      target.product === "note"
-        ? await confirmNoteDeposit(signature, wallet_address, target.id)
-        : await confirmTrancheDeposit(signature, wallet_address, target.id);
-    if (!v.ok) return fail(res, 400, `deposit not verified on-chain: ${v.status}`);
+    const matched = await verifyPpnAgainstCandidates(
+      "deposit",
+      signature,
+      wallet_address,
+      candidates,
+    );
+    if (!matched || !matched.v.ok) {
+      return fail(res, 400, `deposit not verified on-chain: ${matched?.v.status ?? "no_matching_event"}`);
+    }
+    const v = matched.v;
 
     try {
       if (vault_id)
@@ -601,15 +682,21 @@ async function confirmCloseHandler(req: Request, res: Response, status: string) 
   if (!wallet_address) return fail(res, 400, "wallet_address required");
   // TRUST BOUNDARY: prove the tx emitted a Redeemed event on the right
   // ProtectedNote / TrancheVault for THIS wallet + id before recording the exit.
-  const target = await resolvePpnTarget(vault_id, bundle_id);
-  if (!target) {
+  const candidates = await resolvePpnTargets(vault_id, bundle_id);
+  if (candidates.length === 0) {
     return fail(res, 400, "could not resolve the on-chain note/tranche for this confirm");
   }
-  const v =
-    target.product === "note"
-      ? await confirmNoteRedeem(signature, wallet_address, target.id)
-      : await confirmTrancheRedeem(signature, wallet_address, target.id);
-  if (!v.ok) return fail(res, 400, `exit not verified on-chain: ${v.status}`);
+  const matched = await verifyPpnAgainstCandidates(
+    "redeem",
+    signature,
+    wallet_address,
+    candidates,
+  );
+  if (!matched || !matched.v.ok) {
+    return fail(res, 400, `exit not verified on-chain: ${matched?.v.status ?? "no_matching_event"}`);
+  }
+  const v = matched.v;
+  const target = matched.target;
   // Realized payout from the verified event (note: principal+coupon; tranche: payout).
   const payout =
     target.product === "note"

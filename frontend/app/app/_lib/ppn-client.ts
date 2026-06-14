@@ -470,17 +470,13 @@ function toBigintAmount(value: string | number | null | undefined): bigint | nul
 }
 
 /**
- * The on-chain TrancheVault models only senior/junior (a single `bool senior`).
- * Map the UI tranche kind to that flag, refusing "mezzanine" rather than silently
- * routing it into the junior (first-loss) slice it was never priced for.
+ * The on-chain TrancheVault models a single `bool senior`. Senior is the
+ * protected slice; mezzanine and junior both ride the subordinate (first-loss)
+ * slice on-chain. The distinct mezzanine economics (its own attach/detach +
+ * price) live in the off-chain quote + ledger metadata, so the chain only needs
+ * the senior-vs-subordinate flag here.
  */
 function trancheSeniorFlag(kind: "senior" | "mezzanine" | "junior"): boolean {
-  if (kind === "mezzanine") {
-    throw new PpnError(
-      "The mezzanine tranche isn't settleable on-chain yet — the vault holds only senior and junior slices. Choose senior or junior.",
-      0,
-    );
-  }
   return kind === "senior";
 }
 

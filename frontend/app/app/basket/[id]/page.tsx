@@ -393,11 +393,16 @@ const MAX_ORDER_USDC = 250_000;
 const PROTOCOL_FEE_BPS = 25;
 const MM_SPREAD_BPS = 25;
 
-/** Sell tab only — lower protocol fee + merged desk/flow row (see quoteSellFeesBpsFromBooks). */
-const SELL_PROTOCOL_FEE_BPS = 15;
-const SELL_DESK_BASE_BPS = 12;
-const SELL_ADVERSE_BPS_BASE = 8;
-const SELL_ADVERSE_SQRT_K = 220;
+// Sell tab — kept SYMMETRIC with the buy stack so the quotes are consistent:
+// buy $100 → ~99.3 units ⇒ sell 100 units → ~$99.3. Protocol + desk/flow mirror
+// the buy protocol + MM spread (25 bps each); the size-dependent adverse premium
+// is dropped (set to 0) so a large sell doesn't silently diverge from its buy
+// quote. Both sides still pass through live CLOB slippage from their own book
+// side, so the round-trip cost (~2× fee) is the realistic bid/ask spread.
+const SELL_PROTOCOL_FEE_BPS = PROTOCOL_FEE_BPS;
+const SELL_DESK_BASE_BPS = MM_SPREAD_BPS;
+const SELL_ADVERSE_BPS_BASE = 0;
+const SELL_ADVERSE_SQRT_K = 0;
 
 // -------- Sell-side adverse-selection premium ----------------------------
 //
@@ -876,21 +881,25 @@ function BasketBuyPanel({
   const existingPosition = state.basketPositions.find(
     (p) => p.bundleId === bundle.id,
   );
-  const heldQty = virtualHeldQty || onchainHeldQty;
+  // On-chain balance is the source of truth once the wallet is connected and the
+  // first read has landed — it reflects real deposits AND sells/redemptions. The
+  // localStorage "virtual" store is a NON-REACTIVE optimistic overlay for the
+  // brief window right after a buy (before the on-chain read refreshes) and for
+  // mock mode; it must NEVER override a settled on-chain balance, or a completed
+  // on-chain sell keeps showing the pre-sell quantity (the stale-qty artifact).
+  const onchainAuthoritative = appConnected && !pbuBalances.loading;
+  const heldQty = onchainAuthoritative
+    ? onchainHeldQty
+    : virtualHeldQty || onchainHeldQty;
   const sellQty = Math.max(0, Number.parseFloat(sellQtyInput) || 0);
-  // Use cost-basis per token for sell quotes so the displayed "You
-  // receive" matches what `exit_active` actually pays out (pro-rata
-  // share of the USDC pool, which ≈ issue_price per token for a vault
-  // with uniform deposits). Previously this used `navPrice`, which
-  // over-quoted the payout by the NAV-vs-issue-price spread and left
-  // the user confused when they got ~$5 less than the modal promised.
-  // Falls back to navPrice only if we haven't hydrated a cost basis yet.
+  // Quote the sell at the SAME backend reference price the buy uses — the vault
+  // issue price (the 1:1 mint, $1) — NOT the user's cost basis. This keeps the
+  // buy and sell quotes consistent: buy $100 → ~99.3 units ⇒ sell 100 units →
+  // ~$99.3. `avgCost` is used ONLY for the unrealized-PnL display below, never
+  // for the quote (quoting off cost basis made the sell number diverge from the
+  // buy and confused users whose entry price wasn't exactly $1).
   const costPerToken =
-    existingPosition && existingPosition.avgCost > 0
-      ? existingPosition.avgCost
-      : vaultIssuePrice && vaultIssuePrice > 0
-        ? vaultIssuePrice
-        : navPrice;
+    vaultIssuePrice && vaultIssuePrice > 0 ? vaultIssuePrice : 1;
   const sellUsdcNotional = sellQty * costPerToken;
   const sellFees = useMemo(
     () => quoteSellFeesBpsFromBooks(sellUsdcNotional, topLegs, books),
@@ -1770,7 +1779,11 @@ function SellSection({
   mmQuoteLoading: boolean;
 }) {
   const hasPosition = heldQty > 0;
-  const unrealized = hasPosition ? heldQty * (navPrice - avgCost) : 0;
+  // Only show unrealized PnL when we actually have a cost basis. A real on-chain
+  // deposit has no in-session avgCost (avgCost === 0), and `heldQty * navPrice`
+  // would then render the WHOLE position value as a bogus gain.
+  const hasCostBasis = hasPosition && avgCost > 0;
+  const unrealized = hasCostBasis ? heldQty * (navPrice - avgCost) : 0;
   return (
     <>
       <div
@@ -1789,6 +1802,8 @@ function SellSection({
             display: "flex",
             justifyContent: "space-between",
             alignItems: "baseline",
+            flexWrap: "wrap",
+            gap: "4px 16px",
             fontFamily: FM,
             fontSize: 10,
             letterSpacing: "0.14em",
@@ -1797,16 +1812,23 @@ function SellSection({
             fontWeight: 500,
           }}
         >
-          <span>Quantity</span>
+          <span style={{ whiteSpace: "nowrap" }}>Quantity</span>
           {connected && (
-            <span>
-              Held{" "}
-              <span style={{ color: C.textSecondary }}>
-                {heldQty.toFixed(2)} {unitLabel}
-              </span>
-              {hasPosition && (
-                <span style={{ color: C.textMuted, marginLeft: 8 }}>
-                  ({unrealized >= 0 ? "+" : ""}${unrealized.toFixed(2)})
+            <span
+              style={{
+                whiteSpace: "nowrap",
+                display: "inline-flex",
+                alignItems: "baseline",
+                gap: 8,
+              }}
+            >
+              <span>Held</span>
+              {/* Unit is shown below as the input suffix, so keep this compact —
+                  number only — to avoid the label colliding with "Quantity". */}
+              <span style={{ color: C.textSecondary }}>{heldQty.toFixed(2)}</span>
+              {hasCostBasis && (
+                <span style={{ color: unrealized >= 0 ? accent : C.red }}>
+                  {unrealized >= 0 ? "+" : ""}${unrealized.toFixed(2)}
                 </span>
               )}
             </span>
