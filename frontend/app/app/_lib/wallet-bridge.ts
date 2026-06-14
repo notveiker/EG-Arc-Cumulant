@@ -6,13 +6,34 @@
  * User actions are signed CLIENT-SIDE against the deployed contracts via
  * `useCumulant()` (`@/lib/tx`) — there are no backend-built transactions. This
  * module preserves a small exported surface (`useActiveWalletAddress`,
- * `useUsdcBalance`, `explorerTxUrl`, `useWalletSigner`) so call sites compile,
- * while delegating reads to the on-chain wagmi hooks in `@/lib/hooks`.
+ * `useUsdcBalance`, `explorerTxUrl`, `useWalletSigner`) so call sites compile.
+ *
+ * Address resolution: prefer wagmi's `useAccount()`, but fall back to Dynamic's
+ * `primaryWallet.address`. With an external/injected wallet (e.g. MetaMask) the
+ * Dynamic→wagmi bridge can lag or not populate `useAccount()` even though the
+ * wallet is fully connected in Dynamic — which would make every balance/position
+ * read resolve to an empty account and render $0 despite real on-chain funds.
+ * The fallback keeps reads bound to the address the user actually sees + funds.
  */
 import { useCallback, useEffect } from "react";
-import { useAccount } from "wagmi";
-import { useConfig, useUsdcBalance as useChainUsdcBalance } from "@/lib/hooks";
+import { useAccount, useReadContract } from "wagmi";
+import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
+import { formatUnits, type Address } from "viem";
+import { useConfig } from "@/lib/hooks";
+import { erc20Abi } from "@/lib/abi/erc20";
+import { arcTestnet } from "@/lib/chains";
 import { explorerTx } from "@/lib/chains";
+
+/**
+ * The active wallet address, preferring wagmi but falling back to Dynamic's
+ * primaryWallet so an injected wallet that hasn't synced into wagmi still reads.
+ */
+function useResolvedAddress(): Address | undefined {
+  const { address } = useAccount();
+  const { primaryWallet } = useDynamicContext();
+  const dynAddr = primaryWallet?.address as string | undefined;
+  return ((address ?? dynAddr) as Address | undefined) || undefined;
+}
 
 export interface WalletSigner {
   connected: boolean;
@@ -25,13 +46,13 @@ export interface WalletSigner {
 }
 
 export function useWalletSigner(): WalletSigner {
-  const { address, isConnected } = useAccount();
+  const address = useResolvedAddress();
   const signPreparedTx = useCallback(async (_preparedTx: string): Promise<string> => {
     throw new Error(
       "backend-built transactions are not used on Arc — call useCumulant() actions directly",
     );
   }, []);
-  return { connected: isConnected, address: address ?? null, signPreparedTx };
+  return { connected: Boolean(address), address: address ?? null, signPreparedTx };
 }
 
 /**
@@ -40,18 +61,30 @@ export function useWalletSigner(): WalletSigner {
  * address and renders a "connect your wallet" empty state.
  */
 export function useActiveWalletAddress(): string {
-  const { address } = useAccount();
-  return address ?? "";
+  return useResolvedAddress() ?? "";
 }
 
 /**
  * Live USDC balance of the connected wallet, read straight from chain (6dp).
  * Matches the original no-arg surface and `{ uiAmount, loading, error, refresh }`
- * return shape; resolves the USDC address from `/api/config`.
+ * return shape; resolves the USDC address from `/api/config`. The read is pinned
+ * to Arc's chainId so it works via the configured RPC even if the wallet reports
+ * a different active chain, and uses the Dynamic-fallback address (above).
  */
 export function useUsdcBalance() {
   const { data: cfg } = useConfig();
-  const { usd, refetch } = useChainUsdcBalance(cfg?.usdc ?? null);
+  const address = useResolvedAddress();
+  const usdc = (cfg?.usdc ?? null) as Address | null;
+  const { data, refetch } = useReadContract({
+    address: usdc ?? undefined,
+    abi: erc20Abi,
+    functionName: "balanceOf",
+    args: address ? [address] : undefined,
+    chainId: arcTestnet.id,
+    query: { enabled: Boolean(usdc && address), refetchInterval: 10_000 },
+  });
+  const raw = (data as bigint | undefined) ?? 0n;
+  const usd = Number(formatUnits(raw, 6));
   const refresh = useCallback(async () => {
     await refetch();
   }, [refetch]);
