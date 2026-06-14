@@ -36,9 +36,16 @@ export function FaucetButton({ onMinted }: { onMinted?: () => void } = {}) {
       setToast({ explorerUrl: j.data.explorerUrl as string, gas: Boolean(j.data.gasTxHash) });
       window.setTimeout(() => setToast(null), 9000);
       onMinted?.();
-      // Let any live balance/position reader refresh immediately (e.g. the header
-      // USDC pill + the portfolio cash row) instead of waiting for the next poll.
-      window.dispatchEvent(new Event("cumulant:minted"));
+      // Let any live balance/position reader refresh (header USDC pill + portfolio
+      // cash row) instead of waiting for the next 10s poll. Fire now AND again after
+      // a short delay: the mint receipt is already confirmed, but the public RPC the
+      // browser reads balanceOf from can lag a few seconds behind, so a single
+      // refetch often still returns the pre-mint balance — which reads as "nothing
+      // changed". The retries outlast that propagation window.
+      const ping = () => window.dispatchEvent(new Event("cumulant:minted"));
+      ping();
+      window.setTimeout(ping, 2500);
+      window.setTimeout(ping, 6000);
     } catch (e) {
       setErr((e as Error).message);
       window.setTimeout(() => setErr(null), 6000);
