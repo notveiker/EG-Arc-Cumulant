@@ -55,13 +55,18 @@ export function useUsdcBalance() {
   const refresh = useCallback(async () => {
     await refetch();
   }, [refetch]);
-  // Re-check when the user returns to the tab (e.g. after signing in-wallet),
-  // mirroring the upstream balance resilience. The underlying wagmi read keeps
-  // the last-known value on a transient RPC blip, so it never flashes $0.
+  // Re-check when the user returns to the tab (e.g. after signing in-wallet) or
+  // right after a faucet mint (the global "cumulant:minted" event), mirroring the
+  // upstream balance resilience. The underlying wagmi read keeps the last-known
+  // value on a transient RPC blip, so it never flashes $0.
   useEffect(() => {
-    const onFocus = () => void refresh();
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    const onRefresh = () => void refresh();
+    window.addEventListener("focus", onRefresh);
+    window.addEventListener("cumulant:minted", onRefresh);
+    return () => {
+      window.removeEventListener("focus", onRefresh);
+      window.removeEventListener("cumulant:minted", onRefresh);
+    };
   }, [refresh]);
   return { uiAmount: Number.isFinite(usd) ? usd : 0, loading: false, error: null as string | null, refresh };
 }
