@@ -348,7 +348,11 @@ export default function PpnPage() {
         if (!cancelled && body) {
           setChainStatus({
             active_env: body.data?.active_env,
-            contract_address: body.data?.basketVault,
+            // PPN settlement is the ProtectedNote contract (the product the note
+            // flow deposits/redeems against) — NOT the BasketVault, which is a
+            // different product. Falling back to basketVault only if an older
+            // backend doesn't surface protectedNote.
+            contract_address: body.data?.protectedNote ?? body.data?.basketVault,
             usdc_address: body.data?.usdc,
           });
         }
@@ -846,18 +850,26 @@ export default function PpnPage() {
                       const matured = daysLeft <= 0;
                       const vaultIds = note.allVaultIds ?? [note.id];
                       const busy = redeemBusyId === note.id;
+                      // A position is on-chain-backed only if it carries real
+                      // principal. The backend + hydrate already drop stale rows
+                      // from old deployments, so anything with zero principal here
+                      // is an un-quotable ghost — disable Sell/Withdraw on it and
+                      // show an "old-deployment" note instead of a hard "no
+                      // position to sell" error when the user clicks.
+                      const onchainBacked = principal > 0;
                       return (
                         <div key={note.id} className="ppn-position">
                           <div>
                             <strong>{basket?.id ?? note.bundleId}</strong>
                             <span>{fmtUsd(principal, 2)} principal · +{fmtUsd(accrued, 2)} accrued · {daysLeft}d left</span>
+                            {!onchainBacked && <em>Old-deployment position · no on-chain balance to sell.</em>}
                             {redeemError[note.id] && <em>{redeemError[note.id]}</em>}
                           </div>
                           <div className="ppn-position-actions">
-                            <button type="button" disabled={!appConnected || busy || !matured} onClick={() => runExit(note.id, vaultIds, "withdraw")}>
+                            <button type="button" disabled={!appConnected || busy || !matured || !onchainBacked} onClick={() => runExit(note.id, vaultIds, "withdraw")}>
                               {busy && matured ? "Withdrawing…" : "Withdraw"}
                             </button>
-                            <button type="button" disabled={!appConnected || busy || matured} onClick={() => runMmSell(note.id, note.bundleId, principal)}>
+                            <button type="button" disabled={!appConnected || busy || matured || !onchainBacked} onClick={() => runMmSell(note.id, note.bundleId, principal)}>
                               {busy && !matured ? "Selling…" : "Sell to MM"}
                             </button>
                           </div>
@@ -958,7 +970,7 @@ export default function PpnPage() {
               )}
 
               <div className="ppn-chain-box">
-                <span>Settlement</span>
+                <span>Settlement · Protected Note</span>
                 <strong>Arc testnet USDC</strong>
                 <em>{chainStatus?.contract_address ? `${chainStatus.contract_address.slice(0, 10)}...${chainStatus.contract_address.slice(-6)}` : "contract status pending"}</em>
               </div>

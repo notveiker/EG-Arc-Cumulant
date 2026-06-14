@@ -155,8 +155,8 @@ export default function DocsPage() {
 /**
  * Disclaimer banner shown at the top of every documentation page.
  * Standard warning-box styling (amber left border, muted background,
- * bold label). Covers the hackathon scope: testnet/testnet only, no mainnet,
- * no real capital, not investment advice.
+ * bold label). Covers the hackathon scope: Arc testnet only — moves Arc
+ * testnet tokens, no mainnet funds at risk, not investment advice.
  */
 function HackathonNote() {
   return (
@@ -1580,7 +1580,7 @@ curl "https://api.example.com/api/markets/orderbooks?token_ids=<id1>,<id2>"`}
         description="Open a demo PPN position."
         params={[
           ["bundle_id",      "string", "Basket id for the basket slice."],
-          ["wallet_address", "string", "Depositor wallet (base58)."],
+          ["wallet_address", "string", "Depositor wallet (0x address)."],
           ["amount_usdc",    "number", "Total deposit."],
           ["maturity_days",  "number", "7–365."],
         ]}

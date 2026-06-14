@@ -17,9 +17,9 @@ export type Side = 1 | 2; // 1 = YES, 2 = NO
  * the button would sit on "Preparing…" with no modal and no error. Race every
  * signature against a timeout that rejects with an actionable message instead.
  */
-const WALLET_SIGN_TIMEOUT_MS = 90_000;
+const WALLET_SIGN_TIMEOUT_MS = 120_000;
 const WALLET_SIGN_TIMEOUT_MSG =
-  "Wallet didn't return a signature in time. If you signed in with email, the embedded wallet's signer may be rate-limited — try again, or connect an external wallet (e.g. MetaMask).";
+  "Your wallet didn't return a signature in time. Embedded email/social (MPC) wallets can be unreliable to sign on Arc testnet — for on-chain actions, connect an external wallet (MetaMask or Rabby) via the wallet menu and retry.";
 
 export function withWalletTimeout<T>(p: Promise<T>, ms = WALLET_SIGN_TIMEOUT_MS): Promise<T> {
   return new Promise<T>((resolve, reject) => {

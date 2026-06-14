@@ -773,6 +773,19 @@ router.get("/portfolio/:walletAddress", async (req: Request, res: Response) => {
     const DAY = 86_400_000;
     const now = Date.now();
 
+    // On-chain holdings are the ONLY source of truth for what's a LIVE position.
+    // `listOnchainPpnHoldings` reads the CURRENT protectedNote / trancheVault
+    // (via VAULT, keyed to this chainId) and returns only positions with a
+    // positive balance. We key them by (bundle_id, tranche_kind) so the
+    // Supabase-merge / fallback paths below can be gated on a REAL on-chain
+    // holding — a stale ppn_vaults row from an OLD deployment (wrong vault, or
+    // zero current balance) has no matching key and must NOT surface as live.
+    const onchainKey = (bundleId: string, kind: string | null) =>
+      `${bundleId}::${kind ?? "note"}`;
+    const onchainByKey = new Map(
+      onchain.map((h) => [onchainKey(h.bundle_id, h.tranche_kind), h]),
+    );
+
     // PRIMARY source: real on-chain ProtectedNote / TrancheVault holdings. The
     // DB-backed ppn_vaults table is empty when Supabase is unconfigured, so
     // without this the portfolio (and the tranche sell surface) showed $0.00 for
@@ -806,6 +819,8 @@ router.get("/portfolio/:walletAddress", async (req: Request, res: Response) => {
           days_elapsed: Math.max(0, (now - createdMs) / DAY),
           days_remaining: Math.max(0, (maturityMs - now) / DAY),
           estimated_apy: dbV?.estimated_apy ?? 0.08,
+          // Read straight from the current on-chain contracts → always backed.
+          is_onchain_backed: true,
         };
       });
       const totalPrincipal = rows.reduce((s, r) => s + r.principal_usdc, 0);
@@ -830,9 +845,25 @@ router.get("/portfolio/:walletAddress", async (req: Request, res: Response) => {
     // the chain exposes none (the EVM basket vault labels by basket name, not
     // ppn:), fall back to the Supabase rows so the portfolio still renders the
     // user's confirmed notes — merged with on-chain NAV via the share price.
+    //
+    // BOTH fallback paths are gated on a REAL current on-chain holding
+    // (`onchainByKey`, keyed to THIS chain's protectedNote/trancheVault with a
+    // positive balance). A stale ppn_vaults row from an OLD deployment — wrong
+    // vault_address, or zero on-chain principal — has no matching holding and is
+    // dropped, so it can never render as a live position or expose a Sell that
+    // can't be quoted. When `onchain` is empty (the common stale case) every
+    // fallback row is excluded and the portfolio is correctly empty.
     const rows =
       ppnShares.length > 0
-        ? ppnShares.map((s) => {
+        ? ppnShares
+            .filter((s) => {
+              const parts = s.label.split(":");
+              const bundleId = parts[2] ?? "cumulant-vault";
+              const trancheKind =
+                parts[1] && parts[1] !== "note" ? parts[1] : null;
+              return onchainByKey.has(onchainKey(bundleId, trancheKind));
+            })
+            .map((s) => {
             const parts = s.label.split(":");
             const bundleId = parts[2] ?? "cumulant-vault";
             const trancheKind =
@@ -871,9 +902,14 @@ router.get("/portfolio/:walletAddress", async (req: Request, res: Response) => {
                 ? Math.max(0, (maturityMs - now) / DAY)
                 : 0,
               estimated_apy: dbV?.estimated_apy ?? null,
+              is_onchain_backed: true,
             };
           })
-        : dbVaults.map((v) => {
+        : dbVaults
+            .filter((v) =>
+              onchainByKey.has(onchainKey(v.bundle_id, v.tranche_kind ?? null)),
+            )
+            .map((v) => {
             const principal = Number(v.principal_usdc) || 0;
             const value = principal * state.share_price;
             const createdMs = v.created_at
@@ -900,6 +936,7 @@ router.get("/portfolio/:walletAddress", async (req: Request, res: Response) => {
                 ? Math.max(0, (maturityMs - now) / DAY)
                 : 0,
               estimated_apy: v.estimated_apy ?? null,
+              is_onchain_backed: true,
             };
           });
 

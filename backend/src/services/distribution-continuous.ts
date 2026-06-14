@@ -359,6 +359,21 @@ interface Pool {
   k: number; // fixed L2-norm constant, calibrated at pool creation
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SINGLE-INSTANCE PERSISTENCE (distribution markets only).
+//
+// The continuous-distribution pools, market snapshots, and positions below are
+// file-backed local JSON (.distribution-pools.json / -market-snapshots.json /
+// -positions.json), NOT Supabase. This survives a process restart but is bound to
+// ONE backend instance — it is NOT shared across horizontally-scaled replicas.
+// For the demo / a single Akash or local instance this is correct and durable.
+// PROD MULTI-INSTANCE TODO: move these three stores to Supabase (with tx-hash
+// idempotency on open/settle) before running more than one backend replica.
+// NOTE: the on-chain side is already correct + multi-instance-safe — open escrows
+// real USDC and settle/close pay out resolver-signed on-chain with a Supabase
+// ledger row; only this off-chain AMM bookkeeping is single-instance.
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Pools are file-backed (alongside positions). Without this, a backend restart
 // would re-seed every pool with a fresh random backing — so a position opened
 // before the restart would unwind (close-before-settle) against a DIFFERENT
