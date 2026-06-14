@@ -33,3 +33,7 @@ contracts/broadcast/**/run-*.json
 .DS_Store
 .idea/
 .vscode/
+
+# Local handoff docs that contain credentials — never commit
+TEAMMATE_SETUP.md
+*HANDOFF*.md
