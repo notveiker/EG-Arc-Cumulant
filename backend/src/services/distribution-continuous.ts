@@ -17,24 +17,87 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { resolverAddress } from '../chain.js';
-import { config } from '../config.js';
+import { getAddress, parseUnits } from 'viem';
+import { publicClient, resolverAddress, resolverWallet } from '../chain.js';
+import { config, explorerTx } from '../config.js';
 import { confirmTxHash } from './onchain.js';
+import { createTransaction, getTransactionBySignature } from '../db/queries.js';
 import { discoverDistributionCandidates, type DistributionCandidate } from './distribution.js';
 
 const USDC_DECIMALS = Number(process.env.USDC_DECIMALS ?? 6);
 
+/** Minimal MockUSDC mint surface (mirrors routes/faucet.ts). MockUSDC.mint is public. */
+const mintAbi = [
+  {
+    type: 'function',
+    name: 'mint',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+] as const;
+
 /**
- * On Arc the protocol settles by RECORDING the realized net — the continuous-
- * distribution escrow is tracked OFF-CHAIN (the accepted on-chain-capability
- * difference: there's no dedicated Arc contract, and we never auto-spend the
- * treasury wallet). A real payout would be a resolver-signed USDC transfer.
+ * Pay the realized net out to the trader ON-CHAIN. OPEN escrows real USDC from the
+ * user to the resolver/treasury, so settle/close MUST credit the user back — a
+ * no-op stub leaves positions non-redeemable. We mint freely-mintable MockUSDC to
+ * the owner with the resolver wallet (always succeeds; same pattern as the faucet),
+ * which is the reliable Arc analogue of a treasury payout. Returns the real tx
+ * hash + explorer link, or clean nulls when there's nothing to pay (net <= 0).
  */
 async function payOutUsdc(
-  _owner: string,
-  _net: number,
+  owner: string,
+  net: number,
 ): Promise<{ tx_hash: string | null; explorer_url: string | null }> {
-  return { tx_hash: null, explorer_url: null };
+  if (!(net > 0)) return { tx_hash: null, explorer_url: null };
+  const wallet = resolverWallet();
+  if (!wallet || !wallet.account) {
+    throw new Error('Protocol payout signer (resolver) is not configured.');
+  }
+  const amountRaw = parseUnits(net.toFixed(USDC_DECIMALS), USDC_DECIMALS);
+  const hash = await wallet.writeContract({
+    address: config.usdc as `0x${string}`,
+    abi: mintAbi,
+    functionName: 'mint',
+    args: [getAddress(owner), amountRaw],
+    account: wallet.account,
+    chain: wallet.chain,
+  });
+  await publicClient.waitForTransactionReceipt({ hash });
+  return { tx_hash: hash, explorer_url: explorerTx(hash) };
+}
+
+/**
+ * Best-effort ledger row for a distribution payout so the settle/close shows in
+ * Portfolio → History (mirrors routes/deposit.ts confirm). Records the realized
+ * payout as a `redemption`. Idempotent on the payout tx hash; safe no-op when
+ * Supabase is unconfigured or there's no on-chain hash to key on.
+ */
+async function recordPayoutLedger(args: {
+  owner: string;
+  marketId: string;
+  amountUsdc: number;
+  txHash: string | null;
+}): Promise<void> {
+  if (!args.txHash || !(args.amountUsdc > 0)) return;
+  try {
+    const already = await getTransactionBySignature(args.txHash);
+    if (already) return;
+    await createTransaction({
+      bundle_id: args.marketId,
+      wallet_address: args.owner,
+      type: 'redemption',
+      amount_usdc: args.amountUsdc,
+      tokens: 0,
+      fee_usdc: 0,
+      tx_signature: args.txHash,
+    });
+  } catch {
+    /* ledger indexing optional */
+  }
 }
 const GRID_POINTS = 121;
 const MAKER_FEE_BPS = 30; // 0.30%
@@ -867,6 +930,7 @@ export async function settleContinuousPosition(args: { owner: string; positionId
     const minted = await payOutUsdc(pos.owner, net); // protocol pays out (real on-chain)
     settleTxHash = minted.tx_hash;
     explorer = minted.explorer_url;
+    await recordPayoutLedger({ owner: pos.owner, marketId: pos.market_id, amountUsdc: net, txHash: settleTxHash });
   }
 
   pos.settled = true;
@@ -949,6 +1013,7 @@ export async function closeContinuousPosition(args: { owner: string; positionId:
     const minted = await payOutUsdc(pos.owner, net);
     closeTxHash = minted.tx_hash;
     explorer = minted.explorer_url;
+    await recordPayoutLedger({ owner: pos.owner, marketId: pos.market_id, amountUsdc: net, txHash: closeTxHash });
   }
 
   pos.settled = true;
