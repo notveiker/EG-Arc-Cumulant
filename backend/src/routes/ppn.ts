@@ -790,7 +790,10 @@ async function reconstructOnchainSellVault(
 ): Promise<PPNVault | null> {
   if (!wallet) return null;
   const note = /^note-(\d+)$/.exec(id);
-  const tranche = /^tranche-(\d+)-(senior|junior)$/.exec(id);
+  // Mezzanine rides the on-chain subordinate slice (senior=false); resolveRedeemTranche
+  // maps the kind → senior bool, so accept it here too (was senior|junior only, which
+  // made every mezzanine lot resolve to "Vault not found" on the sell surface).
+  const tranche = /^tranche-(\d+)-(senior|junior|mezzanine)$/.exec(id);
   const maturity_date = new Date(Date.now() + 30 * 86_400_000).toISOString();
   if (note) {
     const bundle_id = bundleIdAtIndex(Number(note[1]));
@@ -820,11 +823,24 @@ async function reconstructOnchainSellVault(
  */
 router.post("/tranche/sell/rfq", async (req: Request, res: Response) => {
   try {
-    const body = (req.body ?? {}) as { vault_ids?: unknown; wallet_address?: unknown };
+    const body = (req.body ?? {}) as {
+      vault_ids?: unknown;
+      wallet_address?: unknown;
+      nav?: unknown;
+      sigma?: unknown;
+    };
     const wallet = typeof body.wallet_address === "string" ? body.wallet_address.trim() : "";
     const ids = Array.isArray(body.vault_ids)
       ? body.vault_ids.filter((v): v is string => typeof v === "string" && !!v)
       : [];
+    // Live NAV + σ hint from the client so the indicative quote matches the buy
+    // panel (the backend has no live basket NAV here; issue price ≈ 1.0 would zero
+    // the mezzanine/junior bands). Indicative ONLY — the on-chain redeem pays the
+    // real amount, so a client hint can't affect settlement.
+    const clientNav =
+      typeof body.nav === "number" && body.nav > 0 && body.nav < 1 ? body.nav : null;
+    const clientSigma =
+      typeof body.sigma === "number" && body.sigma > 0 ? body.sigma : null;
     const quotes = await Promise.all(
       ids.map(async (id) => {
         const vault =
@@ -842,11 +858,12 @@ router.post("/tranche/sell/rfq", async (req: Request, res: Response) => {
         const horizonDays = Math.max(1, (maturitySec - nowSec) / 86_400);
 
         const kind = (vault.tranche_kind ?? "senior") as TrancheKind;
-        const nav = bundle?.issue_price ?? vault.price_per_token ?? 0.5;
+        const nav = clientNav ?? bundle?.issue_price ?? vault.price_per_token ?? 0.5;
         const tranche = quoteTranches({
           bundleNav: nav,
           totalLegs: Math.max(1, legs.length || 1),
           horizonDays,
+          ...(clientSigma ? { sigma: clientSigma } : {}),
         }).find((t) => t.kind === kind);
 
         const indicativePct = matured ? 100 : tranche ? tranche.pricePerToken * 100 : 95;
@@ -938,37 +955,84 @@ router.get("/portfolio/:walletAddress", async (req: Request, res: Response) => {
     // without this the portfolio (and the tranche sell surface) showed $0.00 for
     // positions that genuinely exist on-chain. Enrich each holding with the
     // matching Supabase row's term/apy metadata when one exists.
+    // Shape one portfolio row from a holding (real or split-out) + its DB metadata.
+    const buildTrancheRow = (
+      h: { vault_id: string; bundle_id: string; tranche_kind: string | null; principal_usdc: number },
+      dbV: PPNVault | undefined,
+    ) => {
+      const value = h.principal_usdc * state.share_price;
+      const createdMs = dbV?.created_at ? new Date(dbV.created_at).getTime() : now;
+      const maturityMs = dbV?.maturity_date
+        ? new Date(dbV.maturity_date).getTime()
+        : now + 30 * DAY; // 30-day default term (matches the deposit default) when no DB row
+      return {
+        share_id: h.vault_id,
+        vault_id: h.vault_id,
+        bundle_id: h.bundle_id,
+        tranche_kind: h.tranche_kind,
+        // A tranche row must carry a tranche signal so the client buckets it as
+        // a tranche (looksLikeTranche); price_per_token = 1 keeps qty == principal.
+        price_per_token: h.tranche_kind ? (dbV?.price_per_token ?? 1) : null,
+        principal_usdc: h.principal_usdc,
+        yield_deployed_usdc: 0,
+        current_value: value,
+        accrued_yield: value - h.principal_usdc,
+        status: "active",
+        created_at: dbV?.created_at ?? new Date(createdMs).toISOString(),
+        maturity_date: dbV?.maturity_date ?? new Date(maturityMs).toISOString(),
+        days_elapsed: Math.max(0, (now - createdMs) / DAY),
+        days_remaining: Math.max(0, (maturityMs - now) / DAY),
+        estimated_apy: dbV?.estimated_apy ?? 0.08,
+        // Read straight from the current on-chain contracts → always backed.
+        is_onchain_backed: true,
+      };
+    };
+
     if (onchain.length > 0) {
-      const rows = onchain.map((h) => {
+      const rows = onchain.flatMap((h) => {
+        // The on-chain TrancheVault has a single subordinate slice (senior=false)
+        // that backs BOTH junior and mezzanine off-chain positions. On its own it
+        // surfaces only as "junior", so a mezzanine position has no sellable lot.
+        // Split the subordinate principal across the off-chain kinds recorded in
+        // ppn_vaults (prorated by their stored principal) so mezzanine shows up as
+        // its own lot. Falls back to a single junior row when there's no metadata.
+        if (h.tranche_kind === "junior") {
+          const idxMatch = /tranche-(\d+)-/.exec(h.vault_id);
+          const idx = idxMatch ? Number(idxMatch[1]) : null;
+          const subRows = dbVaults.filter(
+            (v) =>
+              v.bundle_id === h.bundle_id &&
+              (v.tranche_kind === "mezzanine" || v.tranche_kind === "junior") &&
+              v.status === "active" &&
+              Number(v.principal_usdc) > 0,
+          );
+          const totalDb = subRows.reduce((s, v) => s + Number(v.principal_usdc), 0);
+          const kinds = Array.from(
+            new Set(subRows.map((v) => v.tranche_kind)),
+          ) as Array<"mezzanine" | "junior">;
+          // Only split when the metadata actually distinguishes a mezzanine slice;
+          // a pure junior holding stays a single row (no behaviour change).
+          if (idx != null && totalDb > 0 && (kinds.length > 1 || kinds[0] === "mezzanine")) {
+            return kinds.map((kind) => {
+              const kindRows = subRows.filter((v) => v.tranche_kind === kind);
+              const kindDb = kindRows.reduce((s, v) => s + Number(v.principal_usdc), 0);
+              const principal = h.principal_usdc * (kindDb / totalDb);
+              return buildTrancheRow(
+                {
+                  vault_id: `tranche-${idx}-${kind}`,
+                  bundle_id: h.bundle_id,
+                  tranche_kind: kind,
+                  principal_usdc: principal,
+                },
+                kindRows[0],
+              );
+            });
+          }
+        }
         const dbV = dbVaults.find(
           (v) => v.bundle_id === h.bundle_id && (v.tranche_kind ?? null) === h.tranche_kind,
         );
-        const value = h.principal_usdc * state.share_price;
-        const createdMs = dbV?.created_at ? new Date(dbV.created_at).getTime() : now;
-        const maturityMs = dbV?.maturity_date
-          ? new Date(dbV.maturity_date).getTime()
-          : now + 30 * DAY; // 30-day default term (matches the deposit default) when no DB row
-        return {
-          share_id: h.vault_id,
-          vault_id: h.vault_id,
-          bundle_id: h.bundle_id,
-          tranche_kind: h.tranche_kind,
-          // A tranche row must carry a tranche signal so the client buckets it as
-          // a tranche (looksLikeTranche); price_per_token = 1 keeps qty == principal.
-          price_per_token: h.tranche_kind ? (dbV?.price_per_token ?? 1) : null,
-          principal_usdc: h.principal_usdc,
-          yield_deployed_usdc: 0,
-          current_value: value,
-          accrued_yield: value - h.principal_usdc,
-          status: "active",
-          created_at: dbV?.created_at ?? new Date(createdMs).toISOString(),
-          maturity_date: dbV?.maturity_date ?? new Date(maturityMs).toISOString(),
-          days_elapsed: Math.max(0, (now - createdMs) / DAY),
-          days_remaining: Math.max(0, (maturityMs - now) / DAY),
-          estimated_apy: dbV?.estimated_apy ?? 0.08,
-          // Read straight from the current on-chain contracts → always backed.
-          is_onchain_backed: true,
-        };
+        return [buildTrancheRow(h, dbV)];
       });
       const totalPrincipal = rows.reduce((s, r) => s + r.principal_usdc, 0);
       const totalValue = rows.reduce((s, r) => s + r.current_value, 0);

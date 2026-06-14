@@ -1397,6 +1397,10 @@ function TrancheBuyPanel({
       const resp = await fetchTrancheSellRfq({
         walletAddress: wallet.address,
         vaultIds: sellLots,
+        // Price the sell off the SAME live NAV + σ the buy panel uses, so a
+        // mezzanine/junior lot quotes consistently instead of collapsing to ~$0.
+        nav: stats.nav,
+        sigma: stats.sigma,
       });
       setSellRfq(resp.quotes);
       if (resp.quotes.length === 0) {

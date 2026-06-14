@@ -364,10 +364,18 @@ export interface TrancheOverlay {
 export async function fetchTrancheSellRfq(args: {
   vaultIds: string[];
   walletAddress: string;
+  /** Live basket NAV + σ so the sell indicative prices the tranche the SAME way
+   *  the buy panel does (otherwise the backend falls back to issue price ≈ 1.0,
+   *  which zeroes the mezzanine/junior bands). Indicative only — settlement still
+   *  pays the on-chain redeem amount. */
+  nav?: number;
+  sigma?: number;
 }): Promise<TrancheSellRfqResponse> {
   return postJson<TrancheSellRfqResponse>("/api/ppn/tranche/sell/rfq", {
     vault_ids: args.vaultIds,
     wallet_address: args.walletAddress,
+    ...(args.nav != null ? { nav: args.nav } : {}),
+    ...(args.sigma != null ? { sigma: args.sigma } : {}),
   });
 }
 
