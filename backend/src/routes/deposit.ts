@@ -20,6 +20,7 @@ import {
   VAULT,
 } from "../services/onchain.js";
 import { validate, depositSchema, redeemSchema } from "../utils/validation.js";
+import { bundleIdAtIndex } from "./bundles.js";
 
 // Basket-vault deposit / redeem routes —
 // Circle Arc (EVM). The translation contract:
@@ -410,11 +411,17 @@ router.get("/portfolio/:walletAddress", async (req: Request, res: Response) => {
       const currentValue = s.shares * state.share_price;
       const costBasis = s.principal_usdc;
       const unrealizedPnl = currentValue - costBasis;
+      // Map the on-chain basket index (from the share id `${vault}:${i}`) to its
+      // canonical CMLT catalog id so the frontend can reconcile DB rows to on-chain
+      // ids. The legacy on-chain basket NAME ("Macro Risk Basket") is kept only as
+      // a human display name; the bundle_id MUST be the catalog key ("CMLT-…").
+      const idx = Number(s.share_id.split(":")[1]);
+      const catalogId = Number.isFinite(idx) ? bundleIdAtIndex(idx) : null;
       return {
         position_id: s.share_id,
         share_id: s.share_id,
-        bundle_id: s.label || "cumulant-vault",
-        bundle_name: s.label || "Cumulant Vault",
+        bundle_id: catalogId ?? s.label ?? "cumulant-vault",
+        bundle_name: s.label || catalogId || "Cumulant Vault",
         bundle_status: "active",
         tokens_held: s.shares,
         entry_price: costBasis > 0 && s.shares > 0 ? costBasis / s.shares : 1,
