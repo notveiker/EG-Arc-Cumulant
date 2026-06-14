@@ -343,7 +343,7 @@ export async function getHighLiquidityMarkets(
 // ---------------------------------------------------------------------------
 
 export interface BasketNAVResult {
-  id: string;          // e.g. "PBU-MID-MED"
+  id: string;          // e.g. "CMLT-MID-MED"
   nav: number;         // weighted average probability of selected legs
   leg_count: number;
   daily_change: number; // signed pct move (e.g. 0.042 = +4.2%)
@@ -413,9 +413,9 @@ export async function getPolymarketBasketNAVs(): Promise<Map<string, BasketNAVRe
   // Candidates that pass volume + tier + window filters go into buckets.
   const buckets = new Map<string, Candidate[]>();
   for (const basket of [
-    'PBU-HIGH-SHORT','PBU-HIGH-MED','PBU-HIGH-LONG',
-    'PBU-MID-SHORT', 'PBU-MID-MED', 'PBU-MID-LONG',
-    'PBU-LOW-SHORT', 'PBU-LOW-MED', 'PBU-LOW-LONG',
+    'CMLT-HIGH-SHORT','CMLT-HIGH-MED','CMLT-HIGH-LONG',
+    'CMLT-MID-SHORT', 'CMLT-MID-MED', 'CMLT-MID-LONG',
+    'CMLT-LOW-SHORT', 'CMLT-LOW-MED', 'CMLT-LOW-LONG',
   ]) buckets.set(basket, []);
 
   // Track which market IDs and event IDs are already claimed per basket
@@ -465,7 +465,7 @@ export async function getPolymarketBasketNAVs(): Promise<Map<string, BasketNAVRe
       if (globalClaimedMarkets.has(m.id)) continue;
 
       for (const win of wins) {
-        const basketId = `PBU-${tier}-${win}`;
+        const basketId = `CMLT-${tier}-${win}`;
         const claimed = claimedPerBasket.get(basketId)!;
 
         // Per-basket event dedup — one leg per event per basket.
@@ -501,9 +501,9 @@ export async function getPolymarketBasketNAVs(): Promise<Map<string, BasketNAVRe
 
   // Tier NAV targets — mirrors TIER_TARGET_NAV from live-baskets.ts.
   const TIER_TARGET: Record<string, number> = {
-    'PBU-HIGH-SHORT': 0.95, 'PBU-HIGH-MED': 0.95, 'PBU-HIGH-LONG': 0.95,
-    'PBU-MID-SHORT':  0.50, 'PBU-MID-MED':  0.50, 'PBU-MID-LONG':  0.50,
-    'PBU-LOW-SHORT':  0.05, 'PBU-LOW-MED':  0.05, 'PBU-LOW-LONG':  0.05,
+    'CMLT-HIGH-SHORT': 0.95, 'CMLT-HIGH-MED': 0.95, 'CMLT-HIGH-LONG': 0.95,
+    'CMLT-MID-SHORT':  0.50, 'CMLT-MID-MED':  0.50, 'CMLT-MID-LONG':  0.50,
+    'CMLT-LOW-SHORT':  0.05, 'CMLT-LOW-MED':  0.05, 'CMLT-LOW-LONG':  0.05,
   };
 
   /**
@@ -590,7 +590,7 @@ export async function getLiveBasketPicks(basketId: string, count = 10): Promise<
   const claimedEvents = new Set<string>();
   const picks: LiveLegPick[] = [];
 
-  const parts = basketId.split('-'); // e.g. ["PBU", "HIGH", "SHORT"]
+  const parts = basketId.split('-'); // e.g. ["CMLT", "HIGH", "SHORT"]
   if (parts.length < 3) return [];
   const targetTier = parts[1] as TierKey;
   const targetWin = parts[2] as WinKey;

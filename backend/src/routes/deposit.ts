@@ -454,7 +454,7 @@ router.get("/transactions/:walletAddress", async (req: Request, res: Response) =
     ]);
     // Map every vault's deposit + redemption hash -> the vault, so each
     // transaction can be tagged with its product type (note / tranche). A tx with
-    // no vault match is a Market Basket (PBU units, no vault share).
+    // no vault match is a Market Basket (CMLT units, no vault share).
     const vaultBySig = new Map<string, (typeof ledgerVaults)[number]>();
     for (const v of ledgerVaults) {
       if (v.onchain_tx_signature) vaultBySig.set(v.onchain_tx_signature, v);

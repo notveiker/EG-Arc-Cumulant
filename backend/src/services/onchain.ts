@@ -119,7 +119,7 @@ export interface OnchainObjects {
 }
 
 /**
- * Map a synthetic bundle id (e.g. "PBU-HIGH-SHORT") to a REAL on-chain basket
+ * Map a synthetic bundle id (e.g. "CMLT-HIGH-SHORT") to a REAL on-chain basket
  * id: `hash(bundleId) % basketCount`, with `basketCount` read from the chain.
  * Returns the basket vault contract address the client should call. Defensive:
  * if no baskets exist yet (or the read fails), `basketId` is null but the vault

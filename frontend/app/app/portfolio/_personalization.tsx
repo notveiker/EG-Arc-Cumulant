@@ -65,7 +65,7 @@ const CAPITAL_CAP = 100_000;
 function pickReferenceBasket(risk: number, horizon: Horizon, live: Bundle[] | null): Bundle | null {
   const tierCode = risk < 30 ? "HIGH" : risk < 70 ? "MID" : "LOW";
   const windowCode = horizon === "short" ? "SHORT" : horizon === "long" ? "LONG" : "MED";
-  const id = `PBU-${tierCode}-${windowCode}`;
+  const id = `CMLT-${tierCode}-${windowCode}`;
   if (live) {
     const hit = live.find((b) => b.id === id);
     if (hit) return hit;
