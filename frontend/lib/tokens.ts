@@ -71,8 +71,9 @@ export function tl(daysLeft: number): "This week" | "This month" | "Long term" {
 }
 
 export function trancheColor(kind: "senior" | "mezzanine" | "junior"): string {
-  // Risk ramp: senior (safe, paid first) = iris, mezzanine = amber, junior (first loss) = coral.
-  return kind === "senior" ? C.blue : kind === "mezzanine" ? C.amber : C.coral;
+  // Risk ramp (on-brand teal→amber→coral): senior (safe, paid first) = teal — the app's
+  // signature accent, matching riskTierColor — mezzanine = amber, junior (first loss) = coral.
+  return kind === "senior" ? C.teal : kind === "mezzanine" ? C.amber : C.coral;
 }
 
 export function lightenColor(hex: string, amount = 0.25): string {
