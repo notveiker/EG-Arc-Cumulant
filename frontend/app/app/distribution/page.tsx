@@ -69,16 +69,24 @@ function categoryMeta(c: string): { label: string; color: string } {
 }
 
 // ---------------------------------------------------------------------------
-/** Unit-height Gaussian kernel (peak 1 at x=μ) — for the live "your view" curve. */
-function gaussianKernel(x: number, mu: number, sigma: number): number {
+/** Normal probability density — mirrors the backend quoteCore so the live chart
+ *  matches the authoritative quote. */
+function normalPdf(x: number, mu: number, sigma: number): number {
   const s = Math.max(sigma, 1e-9);
   const z = (x - mu) / s;
-  return Math.exp(-0.5 * z * z);
+  return Math.exp(-0.5 * z * z) / (s * Math.sqrt(2 * Math.PI));
 }
+
+/** Just the fields DistChart renders — lets us feed it a locally-computed,
+ *  fully-live frame instead of the debounced backend quote. */
+type ChartData = Pick<
+  ContinuousQuote,
+  "x" | "market_pdf" | "target_pdf" | "trade_curve" | "market_mu" | "target_mu" | "unit"
+>;
 
 // Chart: the two continuous Normal curves (market f vs your view g) + payoff.
 // ---------------------------------------------------------------------------
-function DistChart({ quote }: { quote: ContinuousQuote }) {
+function DistChart({ quote }: { quote: ChartData }) {
   const W = 760;
   const HP = 210; // distributions panel
   const HB = 96; // payoff panel
@@ -300,22 +308,41 @@ export default function DistributionPage() {
     };
   }, [market, mu, sigma, collateral]);
 
-  // Live chart preview: the backend quote is debounced (network round-trip), so
-  // while you drag the μ/σ sliders we recompute the "your view" curve g + the
-  // payoff (g − f) locally over the quote's grid — instantly, every render. The
-  // market curve f and the priced numbers still come from the debounced quote.
-  const displayQuote = useMemo(() => {
-    if (!quote || !market) return null;
-    const peakF = Math.max(...quote.market_pdf, 1e-12);
-    // g shares f's Normal form: at σ = market σ the peaks match; narrower σ → taller,
-    // wider σ → flatter. Cap the height ratio (4×) so a very narrow conviction — or a
-    // μ/σ dragged to an extreme where g slides off-grid — can't blow up the chart's
-    // shared auto-scale and visually flatten the market curve f.
-    const ratio = Math.min(market.sigma > 0 ? market.sigma / Math.max(sigma, 1e-9) : 1, 4);
-    const target_pdf = quote.x.map((x) => peakF * ratio * gaussianKernel(x, mu, sigma));
-    const trade_curve = target_pdf.map((g, i) => g - quote.market_pdf[i]);
-    return { ...quote, target_mu: mu, target_pdf, trade_curve };
-  }, [quote, mu, sigma, market]);
+  // Fully-local live chart frame. The backend quote is debounced (network), and
+  // its grid expands to include your view — so driving the chart off it makes the
+  // axis, market curve f, and guide lines snap only on pause. Instead we replicate
+  // the backend quoteCore chart math here (grid + densities + L2 payoff) so the
+  // whole frame moves continuously as you drag. Priced $ numbers still come from
+  // the debounced quote.
+  const displayQuote = useMemo<ChartData | null>(() => {
+    if (!market) return null;
+    const muM = market.mu;
+    const sigM = Math.max(market.sigma, 1e-9);
+    const muT = mu;
+    const sigT = Math.max(sigma, 1e-9);
+    // Grid spans ±4σ of whichever of market / your-view reaches furthest, floored
+    // at 0 for non-negative markets — identical to the backend, so the curve stays
+    // framed as it slides to either end of the slider range.
+    let lo = Math.min(muM - 4 * sigM, muT - 4 * sigT);
+    const hi = Math.max(muM + 4 * sigM, muT + 4 * sigT);
+    if (muM > 0 && muT > 0) lo = Math.max(lo, 0);
+    const N = 121;
+    const dx = (hi - lo) / (N - 1) || 1;
+    const x = Array.from({ length: N }, (_, i) => lo + i * dx);
+    const market_pdf = x.map((xi) => normalPdf(xi, muM, sigM));
+    const rawG = x.map((xi) => normalPdf(xi, muT, sigT));
+    // Payoff shape = L2-normalized g − L2-normalized f (matches backend trade_curve).
+    const l2 = (a: number[]) => Math.max(Math.sqrt(a.reduce((s, v) => s + v * v * dx, 0)), 1e-9);
+    const fU = market_pdf.map((v) => v / l2(market_pdf));
+    const gU = rawG.map((v) => v / l2(rawG));
+    const trade_curve = gU.map((v, i) => v - fU[i]);
+    // Display-only cap: keep a very narrow conviction from dwarfing f's auto-scale.
+    const peakF = Math.max(...market_pdf, 1e-12);
+    const peakG = Math.max(...rawG, 1e-12);
+    const gScale = peakG > 4 * peakF ? (4 * peakF) / peakG : 1;
+    const target_pdf = rawG.map((v) => v * gScale);
+    return { x, market_pdf, target_pdf, trade_curve, market_mu: muM, target_mu: muT, unit: market.unit };
+  }, [market, mu, sigma]);
 
   // Positions for the active wallet.
   const refreshPositions = useCallback(() => {
