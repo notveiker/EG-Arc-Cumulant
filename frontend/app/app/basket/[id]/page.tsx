@@ -74,7 +74,7 @@ export default function BasketDetail() {
 
   // Resolve the basket for this id. **Live data wins when available** —
   // the seed bundle exists only as a fallback for offline / degraded
-  // mode. Since the seed ids now mirror the live-grid ids (PBU-HIGH-
+  // mode. Since the seed ids now mirror the live-grid ids (CMLT-HIGH-
   // SHORT, etc.) a naive "seed first" lookup would permanently shadow
   // the live basket's real leg count, constituents list and resolution
   // span. Priority order:
@@ -281,7 +281,7 @@ export default function BasketDetail() {
               <MetricTile
                 label="ISSUE PRICE"
                 value={`$${bundle.nav.toFixed(3)}`}
-                sub="per PBU unit"
+                sub="per CMLT unit"
               />
               <MetricTile
                 label="MAX PAYOUT"
@@ -369,14 +369,14 @@ const HOW_IT_WORKS: Array<{ num: string; title: string; body: string }> = [
     title: "Settlement",
     body:
       IS_LEGACY
-        ? `Buy signs a wallet transaction, approves USDC, and deposits into the basket vault on Arc testnet, minting PBU units to your wallet.`
-        : "Buy signs a wallet transaction, transfers USDC into the basket vault, takes the protocol fee, and mints PBU units back to your wallet atomically.",
+        ? `Buy signs a wallet transaction, approves USDC, and deposits into the basket vault on Arc testnet, minting CMLT units to your wallet.`
+        : "Buy signs a wallet transaction, transfers USDC into the basket vault, takes the protocol fee, and mints CMLT units back to your wallet atomically.",
   },
   {
     num: "03",
     title: "Redeem at settlement",
     body:
-      "PBU units redeem for their share of the vault once the basket settles at market resolution — live NAV is an estimate until then. Meanwhile, use PBU as collateral in Risk Slices, Protected Notes, or lending to build structured positions.",
+      "CMLT units redeem for their share of the vault once the basket settles at market resolution — live NAV is an estimate until then. Meanwhile, use CMLT as collateral in Risk Slices, Protected Notes, or lending to build structured positions.",
   },
 ];
 
@@ -809,7 +809,7 @@ function BasketBuyPanel({
 
   // ---- Sell quote ---------------------------------------------------
   //
-  // Sell semantics: user inputs a token quantity (PBU). The MM buys
+  // Sell semantics: user inputs a token quantity (CMLT). The MM buys
   // the tokens back, marks-to-market at `qty × navPrice`, and charges
   // protocol + MM fees + bid-side slippage + adverse-selection premium
   // against that notional. `payoutUsdc` is what the user actually
@@ -820,11 +820,11 @@ function BasketBuyPanel({
   // `heldQty` used to read from `state.basketPositions` (the in-memory
   // sandbox reducer), which is empty for any fresh wallet that has
   // deposited only via the real Arc flow. That made the Sell tab
-  // always show "HELD 0.00 PBU" and the button say "No position to
+  // always show "HELD 0.00 CMLT" and the button say "No position to
   // sell" even when the user genuinely held tokens. Now we resolve the
-  // UI basket id (which can be a synthetic "PBU-HIGH-SHORT" that
+  // UI basket id (which can be a synthetic "CMLT-HIGH-SHORT" that
   // routes to a backend bundle at buy time) to the same backend UUID the
-  // deposit flow uses, then look up the Arc PBU balance for that
+  // deposit flow uses, then look up the Arc CMLT balance for that
   // bundle via `usePbuBalances()`. `state.basketPositions` is still
   // consulted for `avgCost` because that's the only place entry price
   // is tracked in-session.
@@ -1603,7 +1603,7 @@ function BuySection({
 }
 
 /**
- * SELL side of the trade panel. Quantity in PBU (with a Max fill from
+ * SELL side of the trade panel. Quantity in CMLT (with a Max fill from
  * the held position), USDC-out at the live NAV minus protocol + MM fees
  * + bid-side slippage + adverse-selection premium.
  *

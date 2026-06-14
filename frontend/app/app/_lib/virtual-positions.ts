@@ -124,7 +124,7 @@ export interface GroupedVirtualPosition {
 
 /**
  * Group virtual positions by UI bundle id (e.g. one group per
- * PBU-HIGH-SHORT, another per PBU-HIGH-MED) so the portfolio can render
+ * CMLT-HIGH-SHORT, another per CMLT-HIGH-MED) so the portfolio can render
  * each as its own card. Groups that share a `uuid` collide on-chain, which
  * the UI surfaces via the redeem-all-at-once flow.
  */

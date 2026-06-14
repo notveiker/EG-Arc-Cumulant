@@ -194,7 +194,7 @@ export default function BasketsPage() {
           <section className="basket-hero">
             <div>
               <h1>Market Baskets</h1>
-              <p>Select a PBU basket, review NAV and constituents, then open the deployment view.</p>
+              <p>Select a CMLT basket, review NAV and constituents, then open the deployment view.</p>
             </div>
           </section>
 

@@ -7,7 +7,7 @@ import { Router, type Request, type Response } from "express";
  * basket universe is synthesised CLIENT-SIDE from the live Polymarket feed
  * (see frontend live-baskets), producing 9 stable ids — one per
  * (risk tier × resolution window). The deposit / PPN clients call GET /api/bundles
- * to map a synthetic id (e.g. "PBU-HIGH-SHORT") to a bundle record before they
+ * to map a synthetic id (e.g. "CMLT-HIGH-SHORT") to a bundle record before they
  * resolve it to an on-chain basket via the EVM adapter (resolveBundleToOnchain).
  *
  * Keeping `id === name === the synthetic label` means resolveBundleUuid* in the
@@ -35,7 +35,7 @@ function synthBundles(): BundleSummary[] {
   const out: BundleSummary[] = [];
   for (const [code, tier] of TIERS) {
     for (const w of WINDOWS) {
-      const id = `PBU-${code}-${w}`;
+      const id = `CMLT-${code}-${w}`;
       out.push({ id, name: id, risk_tier: tier, window: w, status: "active" });
     }
   }

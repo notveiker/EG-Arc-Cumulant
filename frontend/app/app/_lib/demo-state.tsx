@@ -31,7 +31,7 @@ import { IS_LEGACY } from "./chain";
 
 export type BasketPosition = {
   bundleId: string;
-  qty: number; // PBU units held
+  qty: number; // CMLT units held
   avgCost: number; // avg NAV at entry
   // Optional self-describing fields populated by the DB hydrate. Let
   // the reducer + portfolio render a position whose `bundleId` is a
@@ -78,7 +78,7 @@ export type TranchePosition = {
    */
   allVaultIds?: string[];
   /**
-   * Human-readable bundle name (e.g. "PBU-HIGH-SHORT"). Used by the
+   * Human-readable bundle name (e.g. "CMLT-HIGH-SHORT"). Used by the
    * portfolio → tranche deep-link: the tranche detail page resolves its
    * `[id]` param against `bundleById()` (seed names) and the live-basket
    * cache (both use seed names), so navigating by Supabase UUID lands on
@@ -147,7 +147,7 @@ type Action =
       /**
        * Exact tokens-out the UI quoted (post-fee). When present we
        * credit this directly so the portfolio matches the panel's
-       * "You receive X PBU" line to the penny. Absent → reducer falls
+       * "You receive X CMLT" line to the penny. Absent → reducer falls
        * back to a flat 50 bp fee estimate from `usdcAmount / nav`.
        */
       tokensOut?: number;
@@ -221,7 +221,7 @@ function reducer(state: SandboxState, action: Action): SandboxState {
             : 0;
       if (nav <= 0) return state;
       // Use the UI-quoted tokensOut when provided so the portfolio
-      // reflects the "You receive X PBU" line exactly. Without this
+      // reflects the "You receive X CMLT" line exactly. Without this
       // the reducer applied a flat 50 bp fee (0.995) which only agreed
       // with the UI when slippage+fees summed to exactly 50 bp — a
       // coincidence for any real order. Fall back preserved for legacy
