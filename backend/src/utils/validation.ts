@@ -56,7 +56,7 @@ export const createBundleSchema = z
   );
 
 // bundle_id is a product/basket tag (uuid in DB mode, or a slug like
-// "PBU-HIGH-SHORT" when running against on-chain state without Supabase).
+// "CMLT-HIGH-SHORT" when running against on-chain state without Supabase).
 // wallet_address is a 0x-prefixed EVM address (exactly 40 hex chars after 0x).
 // Hex-validated so malformed input is rejected up front rather than failing deep
 // in the Arc RPC.

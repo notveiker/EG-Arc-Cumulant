@@ -35,7 +35,7 @@ interface TxRow {
   price_per_token?: number | null;
   notional_tokens?: number | null;
   // Non-null when the tx matches a ppn_vaults row. Tells a vanilla PPN
-  // buy apart from a basket buy when both have 0 PBU units.
+  // buy apart from a basket buy when both have 0 CMLT units.
   principal_usdc?: number | null;
   // Product type tagged by the backend ledger enrichment (tx hash matched
   // against the vault's deposit/redemption signature).
@@ -257,8 +257,8 @@ export function History({ walletAddress, connected }: HistoryProps) {
     if (!rows || rows.length === 0) {
       return (
         <EmptyState
-          title="No transactions to show"
-          subtitle="Buys, sells and divests appear here once the history ledger is connected. Your open positions are always on the Overview tab."
+          title="No transactions yet"
+          subtitle="Your buys, sells, and divestments will appear here automatically."
         />
       );
     }
@@ -360,7 +360,7 @@ function HeaderRow() {
 function TxRowView({ row }: { row: TxRow }) {
   const label = labelForType(row.type);
   // Display precedence:
-  //   1. `tokens` > 0         — real PBU units for basket deposits/redeems
+  //   1. `tokens` > 0         — real CMLT units for basket deposits/redeems
   //   2. `notional_tokens` > 0 — synthetic face-value units for tranches
   //   3. "—"                   — vanilla PPN (principal-only, no unit)
   const displayTokens = (() => {

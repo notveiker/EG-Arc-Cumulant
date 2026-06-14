@@ -5,12 +5,13 @@ import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { C, FM, BACKEND_URL } from "../_lib/tokens";
 
 /**
- * One-click test-USDC faucet in the header. Mints 10,000 test USDC to the connected
- * Dynamic wallet via the backend (deployer-signed, so the user needs no gas), then pops
- * a bottom toast with a live Arcscan link. Replaces the redundant TESTNET badge — the
- * chain chip already shows the network.
+ * One-click test-USDC faucet. Mints 10,000 test USDC to the connected Dynamic
+ * wallet via the backend (deployer-signed, so the user needs no gas), then pops a
+ * bottom toast with a live Arcscan link. Lives on the Portfolio page (it's a
+ * once-per-demo action); `onMinted` lets the page refresh its balances/positions
+ * after a successful mint.
  */
-export function FaucetButton() {
+export function FaucetButton({ onMinted }: { onMinted?: () => void } = {}) {
   const { primaryWallet, setShowAuthFlow } = useDynamicContext();
   const address = primaryWallet?.address;
   const [busy, setBusy] = useState(false);
@@ -34,6 +35,7 @@ export function FaucetButton() {
       if (!j.ok) throw new Error(j.error ?? "mint failed");
       setToast({ explorerUrl: j.data.explorerUrl as string });
       window.setTimeout(() => setToast(null), 9000);
+      onMinted?.();
     } catch (e) {
       setErr((e as Error).message);
       window.setTimeout(() => setErr(null), 6000);

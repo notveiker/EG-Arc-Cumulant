@@ -51,7 +51,7 @@ export interface PolymarketEvent {
 
 export interface Bundle {
   id: string;
-  name: string; // e.g. "PBU-HIGH-SHORT"
+  name: string; // e.g. "CMLT-HIGH-SHORT"
   risk_tier: 90 | 70 | 50;
   resolution_date: string; // ISO date
   issue_price: number; // e.g. 0.90

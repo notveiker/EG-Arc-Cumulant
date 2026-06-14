@@ -1,5 +1,5 @@
 // Raw live Polymarket market feed — the broad, unfiltered (but volume-floored) set the frontend
-// basket assembler buckets client-side into PBU baskets. Cached so all callers share one pull.
+// basket assembler buckets client-side into CMLT baskets. Cached so all callers share one pull.
 
 import { getHighLiquidityMarkets } from "./polymarket.js";
 import type { PolymarketMarket } from "../types.js";

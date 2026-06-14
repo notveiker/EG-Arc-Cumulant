@@ -186,10 +186,10 @@ const WINDOW_RANGE_EXT: Record<WindowKey, [number, number]> = {
   long: [120, Number.POSITIVE_INFINITY],
 };
 
-// Human-readable basket id segments. We used to build ids like `PBU-90-W`,
+// Human-readable basket id segments. We used to build ids like `CMLT-90-W`,
 // which required the reader to memorise that 90 = high-probability tier and
 // W = short window. The id now reads its risk + duration directly, e.g.
-// `PBU-HIGH-SHORT`, `PBU-MID-MED`, `PBU-LOW-LONG`.
+// `CMLT-HIGH-SHORT`, `CMLT-MID-MED`, `CMLT-LOW-LONG`.
 const TIER_CODE: Record<90 | 70 | 50, string> = {
   90: "HIGH",
   70: "MID",
@@ -826,7 +826,7 @@ export function buildLiveBaskets(candidates: LiveMarket[]): BasketSlot[] {
   const claimedUnderlying = new Set<string>();
 
   for (const [tier, win] of TARGET_COMBOS) {
-    const id = `PBU-${TIER_CODE[tier]}-${WINDOW_CODE[win]}`;
+    const id = `CMLT-${TIER_CODE[tier]}-${WINDOW_CODE[win]}`;
 
     // Score every candidate whose side fits this (tier, window). Only the
     // global underlyingId claim filters here; event/topic dedupe happens
@@ -937,7 +937,7 @@ export function buildLiveBaskets(candidates: LiveMarket[]): BasketSlot[] {
     let jitteredTarget: number | null = null;
     if (tierTarget !== null) {
       const jitterRng = seededRng(`${id}:nav-jitter`);
-      // Basket ids share long common prefixes (`PBU-MID-`), which the
+      // Basket ids share long common prefixes (`CMLT-MID-`), which the
       // FNV/xorshift in `seededRng` turns into near-identical first
       // draws. Burn three draws before reading so sibling tranches
       // actually see different jitter offsets.

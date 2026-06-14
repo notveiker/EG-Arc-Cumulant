@@ -47,7 +47,7 @@ import { useActiveWalletAddress } from "./wallet-bridge";
 export interface BasketPositionOnchain {
   /** On-chain basket id (stringified). Matches the basket-holdings key. */
   bundleId: string;
-  /** UI-visible bundle label, e.g. "PBU-HIGH-SHORT". */
+  /** UI-visible bundle label, e.g. "CMLT-HIGH-SHORT". */
   bundleName: string;
   /** Basket shares held (UI units). */
   qty: number;

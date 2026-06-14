@@ -153,19 +153,19 @@ export const USDC_HISTORY = genFlatHistory(29, "usdc-flat");
 // state so the layout stays stable and values are in the right ballpark.
 export const BUNDLES: Bundle[] = [
   // HIGH tier (≈ 95% probability target)
-  { id: "PBU-HIGH-SHORT", tier: 90, date: dateLabel(10),  daysLeft: 10,  nav: 0.960, issue: 0.95, change: +4.5, hot: false, resolved: 0, totalLegs: 192, ...genBundleHistories(0.960, "PBU-HIGH-SHORT") },
-  { id: "PBU-HIGH-MED",   tier: 90, date: dateLabel(63),  daysLeft: 63,  nav: 0.951, issue: 0.95, change: +0.3, hot: false, resolved: 0, totalLegs: 351, ...genBundleHistories(0.951, "PBU-HIGH-MED") },
-  { id: "PBU-HIGH-LONG",  tier: 90, date: dateLabel(310), daysLeft: 310, nav: 0.940, issue: 0.95, change: +0.6, hot: false, resolved: 0, totalLegs: 418, ...genBundleHistories(0.940, "PBU-HIGH-LONG") },
+  { id: "CMLT-HIGH-SHORT", tier: 90, date: dateLabel(10),  daysLeft: 10,  nav: 0.960, issue: 0.95, change: +4.5, hot: false, resolved: 0, totalLegs: 192, ...genBundleHistories(0.960, "CMLT-HIGH-SHORT") },
+  { id: "CMLT-HIGH-MED",   tier: 90, date: dateLabel(63),  daysLeft: 63,  nav: 0.951, issue: 0.95, change: +0.3, hot: false, resolved: 0, totalLegs: 351, ...genBundleHistories(0.951, "CMLT-HIGH-MED") },
+  { id: "CMLT-HIGH-LONG",  tier: 90, date: dateLabel(310), daysLeft: 310, nav: 0.940, issue: 0.95, change: +0.6, hot: false, resolved: 0, totalLegs: 418, ...genBundleHistories(0.940, "CMLT-HIGH-LONG") },
 
   // MID tier (≈ 50% probability target)
-  { id: "PBU-MID-SHORT",  tier: 70, date: dateLabel(14),  daysLeft: 14,  nav: 0.487, issue: 0.50, change: +8.1, hot: false, resolved: 0, totalLegs: 83,  ...genBundleHistories(0.487, "PBU-MID-SHORT") },
-  { id: "PBU-MID-MED",    tier: 70, date: dateLabel(62),  daysLeft: 62,  nav: 0.519, issue: 0.50, change:  0.0, hot: false, resolved: 0, totalLegs: 181, ...genBundleHistories(0.519, "PBU-MID-MED") },
-  { id: "PBU-MID-LONG",   tier: 70, date: dateLabel(312), daysLeft: 312, nav: 0.512, issue: 0.50, change: +0.4, hot: false, resolved: 0, totalLegs: 274, ...genBundleHistories(0.512, "PBU-MID-LONG") },
+  { id: "CMLT-MID-SHORT",  tier: 70, date: dateLabel(14),  daysLeft: 14,  nav: 0.487, issue: 0.50, change: +8.1, hot: false, resolved: 0, totalLegs: 83,  ...genBundleHistories(0.487, "CMLT-MID-SHORT") },
+  { id: "CMLT-MID-MED",    tier: 70, date: dateLabel(62),  daysLeft: 62,  nav: 0.519, issue: 0.50, change:  0.0, hot: false, resolved: 0, totalLegs: 181, ...genBundleHistories(0.519, "CMLT-MID-MED") },
+  { id: "CMLT-MID-LONG",   tier: 70, date: dateLabel(312), daysLeft: 312, nav: 0.512, issue: 0.50, change: +0.4, hot: false, resolved: 0, totalLegs: 274, ...genBundleHistories(0.512, "CMLT-MID-LONG") },
 
   // LOW tier (≈ 5% probability target — long-shot)
-  { id: "PBU-LOW-SHORT",  tier: 50, date: dateLabel(11),  daysLeft: 11,  nav: 0.054, issue: 0.05, change: -0.1, hot: false, resolved: 0, totalLegs: 42,  ...genBundleHistories(0.054, "PBU-LOW-SHORT") },
-  { id: "PBU-LOW-MED",    tier: 50, date: dateLabel(63),  daysLeft: 63,  nav: 0.045, issue: 0.05, change: +1.4, hot: false, resolved: 0, totalLegs: 108, ...genBundleHistories(0.045, "PBU-LOW-MED") },
-  { id: "PBU-LOW-LONG",   tier: 50, date: dateLabel(327), daysLeft: 327, nav: 0.051, issue: 0.05, change: -0.5, hot: false, resolved: 0, totalLegs: 132, ...genBundleHistories(0.051, "PBU-LOW-LONG") },
+  { id: "CMLT-LOW-SHORT",  tier: 50, date: dateLabel(11),  daysLeft: 11,  nav: 0.054, issue: 0.05, change: -0.1, hot: false, resolved: 0, totalLegs: 42,  ...genBundleHistories(0.054, "CMLT-LOW-SHORT") },
+  { id: "CMLT-LOW-MED",    tier: 50, date: dateLabel(63),  daysLeft: 63,  nav: 0.045, issue: 0.05, change: +1.4, hot: false, resolved: 0, totalLegs: 108, ...genBundleHistories(0.045, "CMLT-LOW-MED") },
+  { id: "CMLT-LOW-LONG",   tier: 50, date: dateLabel(327), daysLeft: 327, nav: 0.051, issue: 0.05, change: -0.5, hot: false, resolved: 0, totalLegs: 132, ...genBundleHistories(0.051, "CMLT-LOW-LONG") },
 ];
 
 export function bundleById(id: string): Bundle | undefined {

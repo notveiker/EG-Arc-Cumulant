@@ -1015,7 +1015,7 @@ function SegmentedSelectorBar({
  *
  * Mirrors the basket-detail BasketBuyPanel: tranche tabs → amount →
  * fee breakdown (protocol / MM spread / underwriting / live slippage)
- * → "you receive X PBU-KIND" → single primary action that opens
+ * → "you receive X CMLT-KIND" → single primary action that opens
  * the wallet picker on demand. Slippage is quoted live from the same
  * CLOB books the basket panel uses, scaled by the tranche's
  * notional share.
@@ -1740,7 +1740,7 @@ function TrancheBuyPanel({
             >
               <span>You receive</span>
               <span style={{ color: accent, fontWeight: 600 }}>
-                {order.tokensOut.toFixed(2)} PSL-
+                {order.tokensOut.toFixed(2)} CMLT-
                 {selected.kind.slice(0, 3).toUpperCase()}
               </span>
             </div>
