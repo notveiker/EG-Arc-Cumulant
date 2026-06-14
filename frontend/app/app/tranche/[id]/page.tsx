@@ -1397,10 +1397,6 @@ function TrancheBuyPanel({
       const resp = await fetchTrancheSellRfq({
         walletAddress: wallet.address,
         vaultIds: sellLots,
-        // Price the sell off the SAME live NAV + σ the buy panel uses, so a
-        // mezzanine/junior lot quotes consistently instead of collapsing to ~$0.
-        nav: stats.nav,
-        sigma: stats.sigma,
       });
       setSellRfq(resp.quotes);
       if (resp.quotes.length === 0) {
@@ -1455,8 +1451,10 @@ function TrancheBuyPanel({
             cumulant,
             bundleId: bundle.id,
             productType: "tranche",
-            sizeUsdc: 0, // full senior/junior position; backend clamps to balance
-            trancheKind: selected.kind === "senior" ? "senior" : "junior",
+            sizeUsdc: 0, // full slice position; backend clamps to the on-chain balance
+            // Pass the real kind so mezzanine gets its own MM bid (it still rides
+            // the subordinate slice on-chain — senior=false — see mm-client).
+            trancheKind: selected.kind,
           });
           lastTxHash = res.signature ?? lastTxHash;
           proceeds += res.quote.payout_usdc;
@@ -1758,49 +1756,38 @@ function TrancheBuyPanel({
               border: `0.5px solid ${C.border}`,
             }}
           >
-            <FeeRow
-              label="Protocol fee"
-              bps={order.protocolFeeBps}
-              usd={(usdcAmount * order.protocolFeeBps) / 10_000}
-              hint="Cumulant protocol take"
-            />
-            <FeeRow
-              label="Market-maker premium"
-              bps={order.mmSpreadBps}
-              usd={
-                (usdcAmount *
-                  order.mmSpreadBps) /
-                10_000
-              }
-              hint="fixed by tranche risk profile, lightly adjusted by liquidity and tenor"
-            />
-            <FeeRow
-              label="Slippage"
-              bps={order.slippageBps}
-              usd={(usdcAmount * order.slippageBps) / 10_000}
-              hint="live market impact + dealer hedge carry + residual tail-risk cost"
-            />
             <div
               style={{
                 display: "flex",
                 justifyContent: "space-between",
                 fontFamily: FM,
-                fontSize: 10.5,
-                color: C.textMuted,
-                fontWeight: 400,
-                paddingTop: 4,
+                fontSize: 11,
+                color: C.textSecondary,
                 letterSpacing: "0.02em",
-                opacity: 0.75,
+                fontWeight: 400,
               }}
             >
-              <span>Total fees</span>
+              <span>Quote notional</span>
+              <span style={{ color: C.textPrimary }}>${usdcAmount.toFixed(2)}</span>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontFamily: FM,
+                fontSize: 11,
+                color: C.textSecondary,
+                letterSpacing: "0.02em",
+                fontWeight: 400,
+              }}
+            >
               <span>
-                {(order.totalFeeBps / 100).toFixed(2)}% · $
-                {((usdcAmount * order.totalFeeBps) / 10_000).toLocaleString(
-                  "en-US",
-                  { maximumFractionDigits: 2 },
-                )}
+                Mint price
+                <span style={{ color: C.textMuted, marginLeft: 6, fontSize: 10 }}>
+                  par, no deposit fee
+                </span>
               </span>
+              <span style={{ color: C.textSecondary }}>$1.00 · 1:1</span>
             </div>
             <div
               style={{
@@ -1821,6 +1808,21 @@ function TrancheBuyPanel({
                 {usdcAmount.toFixed(2)} CMLT-
                 {selected.kind.slice(0, 3).toUpperCase()}
               </span>
+            </div>
+            <div
+              style={{
+                fontFamily: FS,
+                fontSize: 10,
+                color: C.textMuted,
+                letterSpacing: "0.02em",
+                fontWeight: 300,
+                marginTop: 2,
+              }}
+            >
+              Minted 1:1 at par on Arc — no deposit fee. The market-maker spread
+              applies only on an early exit (
+              {selected.kind === "senior" ? "1.5" : selected.kind === "mezzanine" ? "6.0" : "10.0"}%
+              for {selected.kind}).
             </div>
           </div>
         )}
@@ -2056,61 +2058,38 @@ function TrancheBuyPanel({
                       }}
                     >
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ fontFamily: FM, fontSize: 10, color: C.textMuted, letterSpacing: "0.08em" }}>
-                          {q.vault_id.slice(0, 8)}…{q.vault_id.slice(-4)}
+                        <div style={{ fontFamily: FM, fontSize: 11, color: C.textSecondary, letterSpacing: "0.02em", textTransform: "capitalize" }}>
+                          {q.tranche_kind ?? "tranche"} ·{" "}
+                          <span style={{ color: C.textPrimary }}>
+                            {(q.position_size_usdc ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                          </span>{" "}
+                          units
                         </div>
                         <div style={{ fontFamily: FS, fontSize: 11, color: C.textSecondary, marginTop: 2 }}>
                           {q.status === "can_execute_onchain"
-                            ? "Ready for on-chain execution"
+                            ? q.matured
+                              ? "Matured · redeems at par"
+                              : "Ready · MM buys back on-chain"
                             : q.status === "rfq_only"
                               ? `Not matured · ${formatRemaining(q.seconds_remaining)} remaining`
                               : q.error ?? "Unavailable"}
                         </div>
                       </div>
-                      {/* Two-price display.
-                          LEFT number (muted): market-realistic RFQ quote — what
-                          a real MM desk would offer for the early exit given
-                          duration + tier + adverse selection. Typically
-                          93-99% of FV.
-                          RIGHT number (accent): the HONEST on-chain settlement —
-                          what close_early / redeem_at_maturity will actually
-                          pay out. This is what lands in the wallet and what
-                          the portfolio delta will reflect after execution.
-                          The two differ because this demo's on-chain unwind
-                          is a simplified pool-ratio redemption, not a real
-                          secondary-market sale. Both are shown so users can
-                          see the market signal AND the actual outcome. */}
-                      <div style={{ textAlign: "right", display: "flex", flexDirection: "column", gap: 6 }}>
-                        {q.indicative_usdc != null && (
-                          <div>
-                            <div style={{ fontFamily: FM, fontSize: 10, color: C.textMuted, letterSpacing: "0.04em", textTransform: "uppercase" }}>
-                              Market bid
-                            </div>
-                            <div style={{ fontFamily: FD, fontSize: 11, color: C.textSecondary }}>
-                              ${q.indicative_usdc.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                              {q.indicative_price_pct != null && (
-                                <span style={{ color: C.textMuted, marginLeft: 4 }}>
-                                  · {(q.indicative_price_pct * 100).toFixed(1)}% FV
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                        {q.onchain_expected_usdc != null && (
-                          <div>
-                            <div style={{ fontFamily: FM, fontSize: 10, color: C.textMuted, letterSpacing: "0.04em", textTransform: "uppercase" }}>
-                              On-chain settles at
-                            </div>
-                            <div style={{ fontFamily: FD, fontSize: 13, color: C.textPrimary, fontWeight: 600 }}>
-                              ${q.onchain_expected_usdc.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                            </div>
-                            <div style={{ fontFamily: FM, fontSize: 9, color: C.textMuted, marginTop: 1 }}>
-                              {q.matured
-                                ? "principal + yield − 5 bps"
-                                : "pool ratio − 30 bps − 5 bps"}
-                            </div>
-                          </div>
-                        )}
+                      {/* Single honest price: sellToMM pays EXACTLY this signed
+                          payout (flat MM bid below par), so the quote == what
+                          lands in the wallet. */}
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontFamily: FM, fontSize: 10, color: C.textMuted, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+                          You receive
+                        </div>
+                        <div style={{ fontFamily: FD, fontSize: 15, color: C.textPrimary, fontWeight: 600 }}>
+                          ${(q.onchain_expected_usdc ?? q.indicative_usdc ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                        </div>
+                        <div style={{ fontFamily: FM, fontSize: 9, color: C.textMuted, marginTop: 1 }}>
+                          {q.matured
+                            ? "redeems at par"
+                            : `${(q.indicative_price_pct ?? 0).toFixed(1)}% of par · ${q.mm_spread_bps ?? 0} bps spread`}
+                        </div>
                       </div>
                     </div>
                   ))}

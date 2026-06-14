@@ -23,7 +23,9 @@ import { unwrap } from "./http";
 import type { WalletSigner } from "./wallet-bridge";
 
 export type MmProductType = "basket" | "tranche" | "note";
-export type MmTrancheKind = "senior" | "junior";
+// Mezzanine + junior both ride the on-chain subordinate slice (senior=false);
+// only the MM bid differs. Senior is the protected slice (senior=true).
+export type MmTrancheKind = "senior" | "junior" | "mezzanine";
 
 /** The signed MM bid, mirroring the backend `SignedQuote`. */
 export interface MmQuote {
@@ -183,7 +185,9 @@ export async function sellToMMFromBundle(args: {
       quote.vault,
       quote.productId,
       size,
-      quote.trancheKind === "junior" ? false : true,
+      // Senior is the only protected slice; mezzanine + junior are subordinate.
+      // MUST match the backend digest's senior bool (trancheKind === "senior").
+      quote.trancheKind === "senior",
       payout,
       deadline,
       quote.signature,

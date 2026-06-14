@@ -42,18 +42,21 @@ const BPS = 10_000n;
 const QUOTE_TTL_SECONDS = 300;
 
 export type ProductKind = "basket" | "tranche" | "note";
-export type TrancheKind = "senior" | "junior";
+export type TrancheKind = "senior" | "junior" | "mezzanine";
 
 /**
  * MM bid in bps of par per product (the fraction of $1/unit the MM pays for an
  * early exit). Riskier / longer-to-warehouse positions get a deeper discount; the
- * junior tranche absorbs first losses, so it trades furthest below par.
+ * junior tranche absorbs first losses, so it trades furthest below par. Mezzanine
+ * sits between senior and junior. Exported so the tranche sell RFQ quotes the
+ * EXACT bid sellToMM will pay (no quote-vs-execution drift).
  */
-const MM_BID_BPS: Record<string, number> = {
-  basket: 9_750, //            2.50% below par — basket of binaries, warehousing risk
-  note: 9_900, //              1.00% — principal-protected, trades near par
-  "tranche-senior": 9_850, //  1.50% — senior slice, low risk
-  "tranche-junior": 9_000, // 10.00% — first-loss slice, deepest discount
+export const MM_BID_BPS: Record<string, number> = {
+  basket: 9_750, //               2.50% below par — basket of binaries, warehousing risk
+  note: 9_900, //                 1.00% — principal-protected, trades near par
+  "tranche-senior": 9_850, //     1.50% — senior slice, low risk
+  "tranche-mezzanine": 9_400, //  6.00% — mezzanine, between senior and junior
+  "tranche-junior": 9_000, //    10.00% — first-loss slice, deepest discount
 };
 
 export interface SignedQuote {
@@ -212,7 +215,14 @@ export async function quoteSellToMM(args: {
     throw new Error("MM signing key not configured (DEPLOYER_PRIVATE_KEY unset)");
   }
   const seller = args.owner as Address;
-  const trancheKind: TrancheKind = args.trancheKind === "junior" ? "junior" : "senior";
+  // Mezzanine + junior both ride the on-chain subordinate slice (senior=false) and
+  // read the junior balance; only the bid (and the digest's senior bool) differ.
+  const trancheKind: TrancheKind =
+    args.trancheKind === "junior"
+      ? "junior"
+      : args.trancheKind === "mezzanine"
+        ? "mezzanine"
+        : "senior";
 
   // 1. Resolve the bundle → on-chain (vault, productId).
   let vault: Address;
