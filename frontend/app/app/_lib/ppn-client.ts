@@ -391,6 +391,15 @@ export interface PpnPortfolioEntry {
   tranche_attach: number | null;
   tranche_detach: number | null;
   price_per_token: number | null;
+  /**
+   * True only when the row is backed by a REAL position on the CURRENT on-chain
+   * protectedNote/trancheVault with a positive balance. Stale rows from an old
+   * deployment (wrong vault / zero on-chain balance) are tagged false (or omitted
+   * by the backend). The merge helpers drop any row that isn't backed so a stale
+   * position can't render as live or expose an un-quotable Sell. Optional so an
+   * older backend that omits the flag is treated as backed (no regression).
+   */
+  is_onchain_backed?: boolean;
 }
 
 export interface PpnPortfolio {

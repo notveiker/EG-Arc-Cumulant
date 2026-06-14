@@ -36,6 +36,19 @@ export function looksLikeTranche(v: PpnPortfolioEntry): boolean {
 }
 
 /**
+ * A row is a LIVE position only if it's backed by a real holding on the CURRENT
+ * on-chain contracts. The backend already filters stale rows (old deployment /
+ * zero on-chain balance) out of the portfolio, but it ALSO tags surviving rows
+ * with `is_onchain_backed`; this client-side guard is a defense-in-depth so a
+ * stale row can't slip through and render as live or expose a Sell that can't be
+ * quoted. `undefined` is treated as backed so an older backend that omits the
+ * flag doesn't regress; only an explicit `false` is dropped.
+ */
+export function isOnchainBacked(v: PpnPortfolioEntry): boolean {
+  return v.is_onchain_backed !== false;
+}
+
+/**
  * Backend sends `estimated_apy` as a 0..1 fraction (e.g. 0.08 for 8%). UI
  * layers want a percentage (8). Values already > 1 are left alone so a
  * future backend switch to percent won't double-up.
@@ -58,7 +71,9 @@ export function apyPct(apy: number): number {
  */
 export function mergePpnVaults(portfolio: PpnPortfolio): PpnVault[] {
   const ppnMap = new Map<string, PpnVault>();
-  for (const v of portfolio.vaults.filter((x) => !looksLikeTranche(x))) {
+  for (const v of portfolio.vaults.filter(
+    (x) => isOnchainBacked(x) && !looksLikeTranche(x),
+  )) {
     const createdAt = new Date(v.created_at).getTime();
     const maturityDays = v.days_elapsed + v.days_remaining;
     const existing = ppnMap.get(v.bundle_id);
@@ -121,7 +136,9 @@ export function mergeTranches(portfolio: PpnPortfolio): TranchePosition[] {
     allVaultIds: string[];
   };
   const trancheMap = new Map<string, Hydrated>();
-  for (const v of portfolio.vaults.filter(looksLikeTranche)) {
+  for (const v of portfolio.vaults.filter(
+    (x) => isOnchainBacked(x) && looksLikeTranche(x),
+  )) {
     // price_per_token missing / zero falls back to $1 issue price so the row
     // still shows up rather than vanishing. qty * avgCost still equals the
     // correct notional in that fallback path.
