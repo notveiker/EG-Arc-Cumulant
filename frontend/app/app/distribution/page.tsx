@@ -69,11 +69,11 @@ function categoryMeta(c: string): { label: string; color: string } {
 }
 
 // ---------------------------------------------------------------------------
-/** Normal probability density — for the live (un-debounced) "your view" curve. */
-function normalPdf(x: number, mu: number, sigma: number): number {
+/** Unit-height Gaussian kernel (peak 1 at x=μ) — for the live "your view" curve. */
+function gaussianKernel(x: number, mu: number, sigma: number): number {
   const s = Math.max(sigma, 1e-9);
   const z = (x - mu) / s;
-  return Math.exp(-0.5 * z * z) / (s * Math.sqrt(2 * Math.PI));
+  return Math.exp(-0.5 * z * z);
 }
 
 // Chart: the two continuous Normal curves (market f vs your view g) + payoff.
@@ -305,15 +305,17 @@ export default function DistributionPage() {
   // payoff (g − f) locally over the quote's grid — instantly, every render. The
   // market curve f and the priced numbers still come from the debounced quote.
   const displayQuote = useMemo(() => {
-    if (!quote) return null;
-    const rawG = quote.x.map((x) => normalPdf(x, mu, sigma));
-    const sumG = rawG.reduce((a, b) => a + b, 0) || 1;
-    const sumF = quote.market_pdf.reduce((a, b) => a + b, 0) || sumG;
-    const k = sumF / sumG; // match g's scale to f's (convention-agnostic)
-    const target_pdf = rawG.map((g) => g * k);
+    if (!quote || !market) return null;
+    const peakF = Math.max(...quote.market_pdf, 1e-12);
+    // g shares f's Normal form: at σ = market σ the peaks match; narrower σ → taller,
+    // wider σ → flatter. Cap the height ratio (4×) so a very narrow conviction — or a
+    // μ/σ dragged to an extreme where g slides off-grid — can't blow up the chart's
+    // shared auto-scale and visually flatten the market curve f.
+    const ratio = Math.min(market.sigma > 0 ? market.sigma / Math.max(sigma, 1e-9) : 1, 4);
+    const target_pdf = quote.x.map((x) => peakF * ratio * gaussianKernel(x, mu, sigma));
     const trade_curve = target_pdf.map((g, i) => g - quote.market_pdf[i]);
     return { ...quote, target_mu: mu, target_pdf, trade_curve };
-  }, [quote, mu, sigma]);
+  }, [quote, mu, sigma, market]);
 
   // Positions for the active wallet.
   const refreshPositions = useCallback(() => {
@@ -413,7 +415,7 @@ export default function DistributionPage() {
 
         <div className="dc-grid">
           {/* ---- left: market list + your view controls ---- */}
-          <aside style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <aside style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
             <div style={PANEL}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                 <div className="dc-cap">Markets · top liquidity</div>
@@ -672,7 +674,7 @@ export default function DistributionPage() {
         .dc-cap { font-family: ${FM}; font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: ${C.textMuted}; }
         .dc-market-scroll { display: grid; gap: 8px; margin-top: 12px; max-height: 296px; overflow-y: auto; overflow-x: hidden; padding-right: 2px; scrollbar-width: none; -ms-overflow-style: none; }
         .dc-market-scroll::-webkit-scrollbar { width: 0; height: 0; display: none; }
-        .dc-market { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 12px 14px; border: 0.5px solid ${C.border}; border-radius: 10px; cursor: pointer; text-align: left; transition: border-color 0.15s ${EASE}, background 0.15s ${EASE}; }
+        .dc-market { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; overflow: hidden; padding: 12px 14px; border: 0.5px solid ${C.border}; border-radius: 10px; cursor: pointer; text-align: left; transition: border-color 0.15s ${EASE}, background 0.15s ${EASE}; }
         .dc-market:hover { border-color: ${C.borderHover}; }
         .dc-num { width: 100%; background: ${C.surface}; border: 0.5px solid ${C.border}; border-radius: 8px; padding: 10px 12px; color: ${C.textPrimary}; font-family: ${FD}; font-size: 15px; outline: none; }
         .dc-num:focus { border-color: ${C.tealLight}; }
