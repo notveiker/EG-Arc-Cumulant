@@ -30,7 +30,9 @@ export const dynamicEvmNetworks = [
     chainName: "Arc Testnet",
     vanityName: "Arc Testnet",
     iconUrls: ["https://app.dynamic.xyz/assets/networks/eth.svg"],
-    nativeCurrency: { name: "USD Coin", symbol: "USDC", decimals: 6 },
+    // 18-dec native gas (matches the chain + lib/chains.ts). A wrong decimals here
+    // desyncs the embedded MPC wallet's gas math and can hang the co-sign on writes.
+    nativeCurrency: { name: "USD Coin", symbol: "USDC", decimals: 18 },
     networkId: arcTestnet.id,
     rpcUrls: ["https://rpc.testnet.arc.network"],
   },

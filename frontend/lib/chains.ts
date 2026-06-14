@@ -1,10 +1,14 @@
 import { defineChain } from "viem";
 
-/** Circle Arc testnet — EVM L1 with USDC as the native gas token. */
+/** Circle Arc testnet — EVM L1 with USDC as the native gas token.
+ *  Native gas USDC is 18-decimal on-chain (EVM-standard wei accounting) — distinct
+ *  from the 6-decimal USDC/MockUSDC ERC-20 used as product collateral. Declaring 6
+ *  here desyncs the embedded (Dynamic/MPC) wallet's gas accounting and can hang the
+ *  co-sign, so this MUST match the chain's real 18-dec native. */
 export const arcTestnet = defineChain({
   id: 5042002,
   name: "Arc Testnet",
-  nativeCurrency: { name: "USD Coin", symbol: "USDC", decimals: 6 },
+  nativeCurrency: { name: "USD Coin", symbol: "USDC", decimals: 18 },
   rpcUrls: { default: { http: ["https://rpc.testnet.arc.network"] } },
   blockExplorers: {
     default: { name: "Arcscan", url: "https://testnet.arcscan.app" },

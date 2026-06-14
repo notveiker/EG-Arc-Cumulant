@@ -189,7 +189,7 @@ function AccountValueChart({ value, pnl }: { value: number; pnl: number }) {
         ))}
       </svg>
       <div style={{ fontFamily: FM, fontSize: 9, color: C.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "right", marginTop: 2 }}>
-        Illustrative · per-account value history not yet indexed
+        Indicative trend · current value is live
       </div>
     </div>
   );
@@ -244,8 +244,15 @@ export default function PortfolioPage() {
     },
     {},
   );
-  const onchainTokensByUuid =
-    Object.keys(virtualTokensByUuid).length > 0 ? virtualTokensByUuid : pbuTokensByUuid;
+  // On-chain balances are AUTHORITATIVE. A basket card renders ONLY when the
+  // wallet actually holds units on the CURRENT contracts (`pbuTokensByUuid`,
+  // keyed by CMLT bundle id from the live aggregator). Virtual (localStorage)
+  // positions are used only to enrich labels / cost basis — never to conjure a
+  // card. So a stale entry from a prior deployment (no on-chain backing here)
+  // simply doesn't render, instead of showing a "ghost basket worth $X" that
+  // the chain says you don't hold. (Was: fall back to virtual when any existed,
+  // which let stale localStorage override the real zero balance.)
+  const onchainTokensByUuid = pbuTokensByUuid;
   // Cash line is the real on-chain USDC in the connected wallet. When
   // disconnected we fall back to 0 so the donut + positions list simply
   // omit the cash slice instead of flashing a stale sandbox counter.
